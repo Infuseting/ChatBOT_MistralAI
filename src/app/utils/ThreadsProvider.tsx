@@ -1,7 +1,6 @@
 "use client";
 import React, { createContext, useContext, useMemo } from "react";
-
-type Thread = { id: number; name: string, date?: Date };
+import { Thread } from "./Thread";
 
 type ThreadsContextValue = {
   threads: Thread[];
@@ -41,7 +40,9 @@ function generateThreads(): Thread[] {
   return Array.from({ length: count }, (_, i) => ({
     id: i,
     name: makeName(),
-    date: randomDate()
+    date: randomDate(),
+    messages: [],
+    status: 'local' 
   }));
 }
 
@@ -58,5 +59,3 @@ export function useThreads() {
   if (!ctx) throw new Error("useThreads must be used within ThreadsProvider");
   return ctx;
 }
-
-export type { Thread };

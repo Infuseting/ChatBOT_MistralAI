@@ -1,3 +1,5 @@
+"use client";
+
 import { FaTimes, FaRobot } from 'react-icons/fa';
 import { MdManageAccounts } from "react-icons/md";
 import { motion } from "motion/react";

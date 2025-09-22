@@ -1,7 +1,8 @@
+"use client";
 
 import { useEffect } from 'react';
 import { getApiKey, setApiKey, isValidApiKey } from '../utils/ApiKey';
-import { getAvailableModelList, getFastModelList, toggleFastModel, isFastModel } from '../utils/Models';
+import { getAvailableModelList, getFastModelList, toggleFastModel, isFastModel, getActualModel, setActualModel } from '../utils/Models';
 import { useState } from 'react';
 export default function ModeleSettings() {
     const [apiKey, setApiKeyState] = useState('');
@@ -27,7 +28,6 @@ export default function ModeleSettings() {
         const newKey = event.target.value;
         setApiKeyState(newKey);
         setApiKey(newKey);
-        // reset validity until we explicitly check
         setIsApiKeyValid(undefined);
     };
 
@@ -46,6 +46,7 @@ export default function ModeleSettings() {
     const handleToggleFastModelAppend = (model: string) => {
         toggleFastModel(model);
         setFastModelList(getFastModelList());
+        
         console.log("Fast model list updated:", getFastModelList());
     }
     return (
@@ -66,6 +67,15 @@ export default function ModeleSettings() {
                         className={`mt-1 p-2 rounded bg-gray-700 text-white w-full border ${isApiKeyValid === "true" ? "border-green-500 focus:border-green-500 focus:ring-2 focus:ring-green-500" : isApiKeyValid === "false" ? "border-red-500 focus:border-red-500 focus:ring-2 focus:ring-red-500" : "border-orange-500 focus:border-orange-500 focus:ring-2 focus:ring-orange-500"} focus:outline-none`}
                         placeholder='Enter your Mistral API Key here'
                     />
+                </div>
+                <div className='mt-4'>
+                    <select className='w-full p-2 rounded bg-gray-700 text-white border border-gray-600' onChange={(e) => { const model = e.target.value; setActualModel(model); }} >
+                        {fastModelList.map((model) => (
+                            <option key={model} value={model} selected={model === getActualModel()}>
+                                {model}
+                            </option>
+                        ))}
+                    </select>
                 </div>
                 <div className="mt-4">
                     Models available with your API key:

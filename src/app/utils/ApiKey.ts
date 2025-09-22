@@ -1,14 +1,29 @@
 export function getApiKey() {
-    return localStorage.getItem('mistralApiKey') || '';
+    try {
+        if (typeof window === 'undefined' || !window.localStorage) return '';
+        return window.localStorage.getItem('mistralApiKey') || '';
+    } catch (e) {
+        return '';
+    }
 }
 
 export function setApiKey(apiKey: string) {
     console.log("Setting API Key:", apiKey);
-    localStorage.setItem('mistralApiKey', apiKey);
+    try {
+        if (typeof window === 'undefined' || !window.localStorage) return;
+        window.localStorage.setItem('mistralApiKey', apiKey);
+    } catch (e) {
+        
+    }
 }
 
 export function deleteApiKey() {
-    localStorage.removeItem('mistralApiKey');
+    try {
+        if (typeof window === 'undefined' || !window.localStorage) return;
+        window.localStorage.removeItem('mistralApiKey');
+    } catch (e) {
+        
+    }
 }
 
 export async function isValidApiKey(apiKey: string): Promise<boolean> {

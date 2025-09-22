@@ -18,7 +18,6 @@ export default function Navbar() {
     const detailsRef = useRef<HTMLDetailsElement | null>(null);
     const [showSettings, setShowSettings] = useState(false);
     const [showSearch, setShowSearch] = useState(false);
-    // Small expand button when closed
     const navAnimate = navbarOpen ? { x: 0, opacity: 1 } : { x: -280, opacity: 0 };
 
     return (

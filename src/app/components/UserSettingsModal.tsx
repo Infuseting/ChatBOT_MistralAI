@@ -1,0 +1,42 @@
+import { FaTimes, FaRobot } from 'react-icons/fa';
+import { MdManageAccounts } from "react-icons/md";
+import { motion } from "motion/react";
+import { useState } from 'react';
+import AccountSettings from './AccountSettings';
+import ModeleSettings from './ModeleSettings';
+
+const MotionFaTimes = motion(FaTimes);
+
+export default function UserSettingsModal({ onClose }: { onClose: () => void }) {
+    const [panel, setPanel] = useState<'account' | 'modele'>('account');
+
+    return (
+        <div className="fixed inset-0 z-60 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+            <div className="relative flex bg-gray-800 text-white rounded-lg w-[40%] h-[80%] shadow-lg">
+                <nav className="flex flex-col max-w-[25%] h-full rounded-l-lg w-full p-2">
+                    <MotionFaTimes whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} className='w-8 h-8 p-2 rounded-md hover:bg-gray-700' onClick={onClose} />
+                    <ul className='mt-4 space-y-0.5'>
+                        <motion.li onClick={() => setPanel('account')} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className={`p-2 rounded-md flex items-center cursor-pointer space-x-1 ${panel === 'account' ? 'bg-gray-700' : 'hover:bg-gray-700'}`}>
+                            <MdManageAccounts className='inline text-2xl' />
+                            <span>Account</span>
+                        </motion.li>
+                        <motion.li onClick={() => setPanel('modele')} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className={`p-2 rounded-md flex items-center cursor-pointer space-x-1 ${panel === 'modele' ? 'bg-gray-700' : 'hover:bg-gray-700'}`}>
+                            <FaRobot className='inline text-2xl' />
+                            <span>Modele</span>
+                        </motion.li>                        
+                    </ul>
+                </nav>
+                <div
+                    role="separator"
+                    aria-orientation="vertical"
+                    className="w-px bg-gray-700 h-full self-stretch mx-2"
+                />
+                <main className='rounded-r-lg h-full w-full p-4 overflow-auto'>
+                    {panel === 'account' && <AccountSettings />}
+                    {panel === 'modele' && <ModeleSettings />}
+                </main>
+            </div>
+        </div>
+    );
+}

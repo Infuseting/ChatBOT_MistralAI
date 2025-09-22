@@ -12,17 +12,61 @@ import { getThreads, newThread } from '../utils/Thread';
 
 export default function Navbar() {
     const [menuOpen, setMenuOpen] = useState(false);
+    const [navbarOpen, setNavbarOpen] = useState(true);
+    const [showCollapsedButton, setShowCollapsedButton] = useState(false);
+    const waitingForOpenRef = useRef(false);
     const detailsRef = useRef<HTMLDetailsElement | null>(null);
     const [showSettings, setShowSettings] = useState(false);
     const [showSearch, setShowSearch] = useState(false);
+    // Small expand button when closed
+    const navAnimate = navbarOpen ? { x: 0, opacity: 1 } : { x: -280, opacity: 0 };
+
     return (
-        <nav className="w-64 bg-gray-800 text-white p-4 max-h-screen h-screen flex flex-col">
+        <>
+            <div className="fixed top-4 left-4 z-50"> 
+                <motion.button
+                    onClick={() => {
+                        setShowCollapsedButton(false);
+                        waitingForOpenRef.current = true;
+                    }}
+                    initial={false}
+                    animate={showCollapsedButton ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.9 }}
+                    transition={{ duration: 0.15 }}
+                    className="w-10 h-10 rounded-md bg-gray-800 text-white flex items-center justify-center shadow-md"
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onAnimationComplete={() => {
+                        if (!showCollapsedButton && waitingForOpenRef.current) {
+                            waitingForOpenRef.current = false;
+                            setNavbarOpen(true);
+                        }
+                    }}
+                >
+                    <TbLayoutSidebarLeftExpand className="text-2xl" />
+                </motion.button>
+            </div>
+
+            <motion.nav
+                className="w-64 bg-gray-800 text-white p-4 max-h-screen h-screen flex flex-col"
+                initial={false}
+                animate={navAnimate}
+                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                style={{ position: 'relative', zIndex: 40, pointerEvents: navbarOpen ? 'auto' : 'none' }}
+                aria-hidden={!navbarOpen}
+                onAnimationComplete={() => {
+                    if (!navbarOpen) {
+                        setShowCollapsedButton(true);
+                    } else {
+                        setShowCollapsedButton(false);
+                    }
+                }}
+            >
             
             <div className="flex justify-between items-center">
-                <motion.div className="w-8 h-8 rounded-md hover:bg-gray-600 flex items-center justify-center cursor-pointer" whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
+                <motion.div onClick={() => newThread()} className="w-8 h-8 rounded-md hover:bg-gray-600 flex items-center justify-center cursor-pointer" whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
                     <FaPlus className="text-2xl text-white" />
                 </motion.div>
-                <motion.div className="w-8 h-8 rounded-md hover:bg-gray-600 flex items-center justify-center cursor-pointer" whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
+                <motion.div onClick={() => setNavbarOpen(!navbarOpen)} className="w-8 h-8 rounded-md hover:bg-gray-600 flex items-center justify-center cursor-pointer" whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
                     <TbLayoutSidebarLeftCollapse className="text-2xl text-white" />
                 </motion.div>
 
@@ -163,6 +207,7 @@ export default function Navbar() {
             {showSettings && <UserSettingsModal onClose={() => setShowSettings(false)} />}
             {showSearch && <SearchModal onClose={() => setShowSearch(false)} />}
             
-        </nav>
+            </motion.nav>
+        </>
     );
 }

@@ -13,8 +13,8 @@ export default function UserSettingsModal({ onClose }: { onClose: () => void }) 
     return (
         <div className="fixed inset-0 z-60 flex items-center justify-center">
             <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-            <div className="relative flex bg-gray-800 text-white rounded-lg w-[40%] h-[80%] shadow-lg">
-                <nav className="flex flex-col max-w-[25%] h-full rounded-l-lg w-full p-2">
+            <div className="relative flex bg-gray-800 text-white rounded-lg xl:w-[40%] lg:w-[50%] md:w-[70%] sm:w-[80%] w-[100%] max-h-[80%] min-h-[40%] h-[80%] shadow-lg">
+                <nav className="flex flex-col max-w-[30%] h-full rounded-l-lg w-full p-2">
                     <MotionFaTimes whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} className='w-8 h-8 p-2 rounded-md hover:bg-gray-700' onClick={onClose} />
                     <ul className='mt-4 space-y-0.5'>
                         <motion.li onClick={() => setPanel('account')} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className={`p-2 rounded-md flex items-center cursor-pointer space-x-1 ${panel === 'account' ? 'bg-gray-700' : 'hover:bg-gray-700'}`}>

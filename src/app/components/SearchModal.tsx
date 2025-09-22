@@ -11,7 +11,7 @@ export default function SearchModal({ onClose }: { onClose: () => void }) {
     return (
         <div className="fixed inset-0 z-60 flex items-center justify-center">
             <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-            <div className="relative flex flex-col bg-gray-800 text-white rounded-lg w-[40%] max-h-[80%] min-h-[40%] shadow-lg">
+            <div className="relative flex flex-col bg-gray-800 text-white rounded-lg xl:w-[40%] lg:w-[50%] md:w-[70%] sm:w-[80%] w-[90%] max-h-[80%] min-h-[40%] shadow-lg">
                 <nav className="flex flex-row w-full h-12 rounded-t-lg p-4 mb-4">
                     <input
                         type="text"

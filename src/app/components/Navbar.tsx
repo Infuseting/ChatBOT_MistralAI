@@ -51,7 +51,7 @@ export default function Navbar() {
                 initial={false}
                 animate={navAnimate}
                 transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-                style={{ position: 'relative', zIndex: 40, pointerEvents: navbarOpen ? 'auto' : 'none' }}
+                style={{ position: 'relative', zIndex: 40, pointerEvents: navbarOpen ? 'auto' : 'none', width: navbarOpen ? undefined : 0, padding: navbarOpen ? undefined : 0 }}
                 aria-hidden={!navbarOpen}
                 onAnimationComplete={() => {
                     if (!navbarOpen) {

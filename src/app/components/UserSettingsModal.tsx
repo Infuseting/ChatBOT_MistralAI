@@ -2,15 +2,17 @@
 
 import { FaTimes, FaRobot } from 'react-icons/fa';
 import { MdManageAccounts } from "react-icons/md";
+import { AiOutlineBook } from "react-icons/ai";
 import { motion } from "motion/react";
 import { useState } from 'react';
 import AccountSettings from './AccountSettings';
 import ModeleSettings from './ModeleSettings';
+import ContextSettings from './ContextSettings';
 
 const MotionFaTimes = motion(FaTimes);
 
 export default function UserSettingsModal({ onClose }: { onClose: () => void }) {
-    const [panel, setPanel] = useState<'account' | 'modele'>('account');
+    const [panel, setPanel] = useState<'account' | 'modele' | 'context'>('account');
 
     return (
         <div className="fixed inset-0 z-60 flex items-center justify-center">
@@ -26,7 +28,11 @@ export default function UserSettingsModal({ onClose }: { onClose: () => void }) 
                         <motion.li onClick={() => setPanel('modele')} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className={`p-2 rounded-md flex items-center cursor-pointer space-x-1 ${panel === 'modele' ? 'bg-gray-700' : 'hover:bg-gray-700'}`}>
                             <FaRobot className='inline text-2xl' />
                             <span>Modele</span>
-                        </motion.li>                        
+                        </motion.li>
+                        <motion.li onClick={() => setPanel('context')} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className={`p-2 rounded-md flex items-center cursor-pointer space-x-1 ${panel === 'modele' ? 'bg-gray-700' : 'hover:bg-gray-700'}`}>
+                            <AiOutlineBook className='inline text-2xl' />
+                            <span>Context</span>
+                        </motion.li>                           
                     </ul>
                 </nav>
                 <div
@@ -37,6 +43,7 @@ export default function UserSettingsModal({ onClose }: { onClose: () => void }) 
                 <main className='rounded-r-lg h-full w-full p-4 overflow-auto'>
                     {panel === 'account' && <AccountSettings />}
                     {panel === 'modele' && <ModeleSettings />}
+                    {panel === 'context' && <ContextSettings />}
                 </main>
             </div>
         </div>

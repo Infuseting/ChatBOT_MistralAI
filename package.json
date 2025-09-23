@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "highlight.js": "^11.11.1",
     "motion": "^12.23.18",
     "next": "15.5.3",
     "react": "19.1.0",

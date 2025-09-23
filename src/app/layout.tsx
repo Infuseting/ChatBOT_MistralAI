@@ -28,7 +28,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <ThreadsProvider>{children}</ThreadsProvider>
+        <ThreadsProvider>
+          {children}
+        </ThreadsProvider>
       </body>
     </html>
   );

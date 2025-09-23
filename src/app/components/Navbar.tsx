@@ -6,10 +6,10 @@ import { FaMagnifyingGlass, FaDoorOpen } from "react-icons/fa6";
 import { IoMdSettings, IoMdArrowDropdown } from "react-icons/io";
 import UserSettingsModal from "./UserSettingsModal";
 import SearchModal from "./SearchModal";
-import { selectThreadById } from "../utils/Thread";
+import { setActualThread } from "../utils/Thread";
 import { motion } from "motion/react";
 import { getThreads, newThread } from '../utils/Thread';
-
+import { getActualThread } from '../utils/Thread';
 export default function Navbar() {
     const [menuOpen, setMenuOpen] = useState(false);
     const [navbarOpen, setNavbarOpen] = useState(true);
@@ -22,7 +22,7 @@ export default function Navbar() {
 
     return (
         <>
-            <div className="fixed top-4 left-4 z-50"> 
+            <div className="fixed top-4 left-4 z-100"> 
                 <motion.button
                     onClick={() => {
                         setShowCollapsedButton(false);
@@ -31,7 +31,7 @@ export default function Navbar() {
                     initial={false}
                     animate={showCollapsedButton ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.9 }}
                     transition={{ duration: 0.15 }}
-                    className="w-10 h-10 rounded-md bg-gray-800 text-white flex items-center justify-center shadow-md"
+                    className={`w-10 h-10 rounded-md bg-gray-800 text-white flex items-center justify-center shadow-md ${navbarOpen ? 'hidden' : 'block'}`}
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     onAnimationComplete={() => {
@@ -45,12 +45,20 @@ export default function Navbar() {
                 </motion.button>
             </div>
 
+            {/* small-screen backdrop: visible only on screens smaller than `sm` */}
+            {navbarOpen && (
+                <div
+                    className={`fixed inset-0 z-30 bg-black/40 backdrop-blur-lg sm:hidden `}
+                    onClick={() => setNavbarOpen(false)}
+                />
+            )}
+
             <motion.nav
-                className="w-64 bg-gray-800 text-white p-4 max-h-screen h-screen flex flex-col"
+                className={`fixed sm:relative left-0 top-0 z-40 w-64 bg-gray-800 text-white p-4 max-h-screen h-screen flex flex-col`}
                 initial={false}
                 animate={navAnimate}
                 transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-                style={{ position: 'relative', zIndex: 40, pointerEvents: navbarOpen ? 'auto' : 'none', width: navbarOpen ? undefined : 0, padding: navbarOpen ? undefined : 0 }}
+                style={{ pointerEvents: navbarOpen ? 'auto' : 'none', width: navbarOpen ? undefined : 0, padding: navbarOpen ? undefined : 0 }}
                 aria-hidden={!navbarOpen}
                 onAnimationComplete={() => {
                     if (!navbarOpen) {
@@ -132,12 +140,13 @@ export default function Navbar() {
                             return (
                                 <div key={title} className="space-y-1 p-1">
                                     <div className="text-xs uppercase text-gray-400 px-2 py-1">{title}</div>
-                                    {items.map((t) => (
+                                        {items.map((t) => (
                                         <motion.div
                                             key={t.id}
                                             className="w-full p-2 rounded-md hover:bg-gray-700 cursor-pointer"
                                             whileHover={{ scale: 1.02 }}
                                             whileTap={{ scale: 0.98 }}
+                                            onClick={() => setActualThread(t as any)}
                                         >
                                             <div className="text-sm truncate">{t.name}</div>
                                             
@@ -158,10 +167,10 @@ export default function Navbar() {
                                         {items.map((t) => (
                                             <motion.div
                                                 key={t.id}
-                                                className="w-full p-2 rounded-md hover:bg-gray-700 cursor-pointer"
+                                                className={`w-full p-2 rounded-md hover:bg-gray-700 cursor-pointer ${getActualThread()?.id === t.id ? 'bg-gray-700' : ''}`}
                                                 whileHover={{ scale: 1.02 }}
                                                 whileTap={{ scale: 0.98 }}
-                                                onClick={() => { selectThreadById(t.id); }}
+                                                onClick={() => { setActualThread(t as any); }}
                                             >
                                                 <div className="text-sm truncate">{t.name}</div>
                                             </motion.div>

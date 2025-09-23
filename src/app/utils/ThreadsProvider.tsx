@@ -1,55 +1,73 @@
 "use client";
-import React, { createContext, useContext, useMemo } from "react";
+import React, { createContext, useContext, useEffect, useState } from "react";
 import { Thread } from "./Thread";
 
 type ThreadsContextValue = {
   threads: Thread[];
+  setThreads: (t: Thread[]) => void;
 };
 
 const ThreadsContext = createContext<ThreadsContextValue | undefined>(undefined);
 
-function generateThreads(): Thread[] {
-  const MAX_THREADS = 200;
-  const count = Math.floor(Math.random() * MAX_THREADS) + 1;
-
-  const lorem = [
-    "lorem","ipsum","dolor","sit","amet","consectetur","adipiscing","elit",
-    "sed","do","eiusmod","tempor","incididunt","ut","labore","et","dolore",
-    "magna","aliqua","enim","minim","veniam","quis","nostrud","exercitation"
+function makeQuickSample(): Thread[] {
+  // small, fast sample to avoid blocking initial render
+  return [
+    { id: '0', name: 'Welcome', date: new Date(), messages: [], status: 'local', context: '', model: null as any, share: false },
   ];
-
-  const rand = (n: number) => Math.floor(Math.random() * n);
-
-  const makeName = () => {
-    const words = Math.floor(Math.random() * 10) + 1; // 1-10 words
-    const parts: string[] = [];
-    for (let i = 0; i < words; i++) {
-      const w = lorem[rand(lorem.length)];
-      parts.push(i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w);
-    }
-    return parts.join(" ");
-  };
-
-  // Compute time range: from now back to 5 years ago
-  const now = Date.now();
-  const fiveYearsMs = 5 * 365 * 24 * 60 * 60 * 1000; // approx 5 years in ms
-  const start = now - fiveYearsMs;
-
-  const randomDate = () => new Date(start + Math.floor(Math.random() * (now - start + 1)));
-
-  return Array.from({ length: count }, (_, i) => ({
-    id: i,
-    name: makeName(),
-    date: randomDate(),
-    messages: [],
-    status: 'local' 
-  }));
 }
 
 export function ThreadsProvider({ children }: { children: React.ReactNode }) {
-  const threads = useMemo(() => generateThreads(), []);
+  const [threads, setThreads] = useState<Thread[]>(() => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const raw = window.localStorage.getItem('threads');
+        if (raw) {
+          return JSON.parse(raw) as Thread[];
+        }
+      }
+    } catch (e) {
+      // ignore parsing errors
+    }
+    return makeQuickSample();
+  });
 
-  const value = useMemo(() => ({ threads }), [threads]);
+  useEffect(() => {
+    // persist threads to localStorage whenever they change
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem('threads', JSON.stringify(threads));
+        try {
+          const ids = threads.map(t => t.id).join(',');
+          window.localStorage.setItem('threadIds', ids);
+        } catch (e) {}
+      }
+    } catch (e) {}
+  }, [threads]);
+
+  // Asynchronously generate a larger sample if no threads existed previously
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined' || !window.localStorage) return;
+      const raw = window.localStorage.getItem('threads');
+      if (raw) return; // already persisted
+
+      // schedule a background generation to avoid blocking initial paint
+      const id = setTimeout(() => {
+        try {
+          // lightweight generation: only a few threads/messages to keep app responsive
+          const generated: Thread[] = [];
+          for (let i = 0; i < 10; i++) {
+            generated.push({ id: `${i}`, name: `Thread ${i}`, date: new Date(), messages: [], status: 'local', context: '', model: null as any, share: false });
+          }
+          setThreads(generated);
+          window.localStorage.setItem('threads', JSON.stringify(generated));
+        } catch (e) {}
+      }, 50);
+      return () => clearTimeout(id);
+    } catch (e) {}
+  }, []);
+
+  const value = { threads, setThreads };
 
   return <ThreadsContext.Provider value={value}>{children}</ThreadsContext.Provider>;
 }

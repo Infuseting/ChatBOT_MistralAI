@@ -4,7 +4,7 @@ type Message = {
     thinking : string,
     sender: 'user' | 'assistant',
     timestamp: Date,
-    parentId?: string
+    parentId: string
 }
 
 export type { Message };

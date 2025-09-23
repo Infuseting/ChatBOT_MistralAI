@@ -4,8 +4,10 @@ import { motion } from "motion/react";
 import { getActualThread, getShareLink, Thread } from "../utils/Thread";
 import { toast, Bounce } from "react-toastify";
 import { useState, useRef, useEffect } from "react";
+import { FaPlus, FaMicrophone, FaPaperPlane } from "react-icons/fa";
 import SystemContextModal from "./SystemContextModal";
 import { getActualModel, getAvailableModelList, getFastModelList, setActualModel } from '../utils/Models';
+import ChatMessages from "./ChatMessages";
 async function handleShare() {
     try {
         console.log("Sharing thread:", (globalThis as any).actualThread);
@@ -58,11 +60,14 @@ export default function Chatbot() {
     const [contextModalOpen, setContextModalOpen] = useState(false);
     const [actualModel, setActualModelState] = useState<string | null>(null);
     const [models, setModels] = useState<string[]>([]);
+    const [actualThread, setActualThread] = useState<Thread | null>(getActualThread());
     
     const menuRef = useRef<HTMLDivElement | null>(null);
     const firstItemRef = useRef<HTMLButtonElement | null>(null);
+    const messagesWrapperRef = useRef<HTMLDivElement | null>(null);
+    const inputBarRef = useRef<HTMLDivElement | null>(null);
     function handleDropdownMenu() {
-        if (getActualThread() === null) {toast.error('Aucun thread ouvert', {
+        if (actualThread === null) {toast.error('Aucun thread ouvert', {
             position: "bottom-right",
             autoClose: 5000,
             hideProgressBar: false,
@@ -90,9 +95,19 @@ export default function Chatbot() {
                 
             }
         }
+        function onActualThreadUpdated(e: Event) {
+            try {
+                const t = (e as CustomEvent).detail as Thread | null;
+                setActualThread(t ?? getActualThread());
+            } catch (err) {
+                setActualThread(getActualThread());
+            }
+        }
         window.addEventListener('fastModelListUpdated', onFastModelListUpdated);
+        window.addEventListener('actualThreadUpdated', onActualThreadUpdated as EventListener);
         return () => {
             window.removeEventListener('fastModelListUpdated', onFastModelListUpdated);
+            window.removeEventListener('actualThreadUpdated', onActualThreadUpdated as EventListener);
         };
     }, []);
     
@@ -110,7 +125,7 @@ export default function Chatbot() {
             transition: Bounce,
         });
         setModelPanelOpen(false);
-        const thread = getActualThread();
+        const thread = actualThread;
         if (thread) {
             thread.model = model;
             setActualModelState(model);
@@ -144,6 +159,42 @@ export default function Chatbot() {
             firstItemRef.current?.focus();
         }
     }, [dropdownMenuOpen]);
+
+    useEffect(() => {
+        function updatePosition() {
+            const parent = messagesWrapperRef.current;
+            const bar = inputBarRef.current;
+            if (!parent || !bar) return;
+            const rect = parent.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            bar.style.left = `${Math.round(centerX)}px`;
+        }
+
+        let raf = 0;
+        function onScrollOrResize() {
+            if (raf) cancelAnimationFrame(raf);
+            raf = requestAnimationFrame(updatePosition);
+        }
+
+        // Initial position
+        updatePosition();
+
+        window.addEventListener('resize', onScrollOrResize);
+        window.addEventListener('scroll', onScrollOrResize, true);
+        const parentEl = messagesWrapperRef.current;
+        parentEl?.addEventListener('scroll', onScrollOrResize);
+
+        const mo = new MutationObserver(onScrollOrResize);
+        mo.observe(document.body, { attributes: true, childList: true, subtree: true });
+
+        return () => {
+            window.removeEventListener('resize', onScrollOrResize);
+            window.removeEventListener('scroll', onScrollOrResize, true);
+            parentEl?.removeEventListener('scroll', onScrollOrResize);
+            mo.disconnect();
+            if (raf) cancelAnimationFrame(raf);
+        };
+    }, [actualThread]);
 
   return (
      <div className="w-full h-full bg-gray-700">
@@ -194,6 +245,159 @@ export default function Chatbot() {
             </div>
             {contextModalOpen && <SystemContextModal onClose={() => setContextModalOpen(false)} />}
 
+        </div>
+        <div className="h-full">
+        {
+            actualThread === null ? (
+                <div className="mx-20 h-full flex items-center justify-center">
+                    <p className="text-gray-300 text-lg text-center">No thread selected. Please create or select a thread to start chatting.</p>
+                </div>
+            ) : ((actualThread?.messages?.length ?? 0) > 0) ? (
+                <div ref={messagesWrapperRef} className="h-full overflow-auto relative">
+                    <ChatMessages thread={actualThread}/>
+                    {/* Centered fixed input bar */}
+                    <div ref={inputBarRef} className="fixed bottom-0 transform -translate-x-1/2 pb-4 bg-gray-700 pointer-events-auto mx-auto w-[calc(100%_-_2.5rem)] 2xl:max-w-6xl xl:max-w-4xl lg:max-w-3xl md:max-w-2xl sm:max-w-lg max-w-80 max-h-90" style={{ left: '50%' }}>
+                        <div className="flex items-center space-x-2 p-4 bg-gray-800 rounded-md shadow-lg ">
+                            
+                            <div className="flex-shrink-0">
+                                <label htmlFor="chat-file-input" className="flex items-center justify-center w-10 h-10 hover:bg-gray-600 text-white rounded-md cursor-pointer select-none" title="Add files" aria-label="Add files">
+                                    <FaPlus className="w-5 h-5" />
+                                </label>
+                                <input
+                                    id="chat-file-input"
+                                    type="file"
+                                    multiple
+                                    className="hidden"
+                                    onChange={(e) => {
+                                        const files = e.currentTarget.files;
+                                        if (!files) return;
+                                        console.log("Files selected:", files);
+                                        
+                                    }}
+                                />
+                            </div>
+
+                        
+                            <div className="flex flex-1 items-center">
+                                <textarea
+                                    className="w-full bg-gray-800 max-h-80 text-white px-2 conversations-scroll rounded-md resize-none overflow-y-auto focus:outline-none placeholder-gray-400"
+                                    placeholder={`${!isRightBranch ? "You need to be on the right branch to type your request..." : "Type your request..."}`}
+                                    onInput={(e) => {
+                                        const el = e.currentTarget as HTMLTextAreaElement;
+                                        el.style.height = "auto";
+                                        el.style.height = `${el.scrollHeight}px`;
+                                    }}
+                                    rows={1}
+                                    style={{ paddingTop: 0, paddingBottom: 0 }}
+                                />
+                            </div>
+
+
+                            <div className="flex-shrink-0 flex items-center 2xl:space-x-2 xl:space-x-2 lg:space-x-2 md:space-x-2">
+                                <button
+                                    type="button"
+                                    className="flex items-center justify-center w-10 h-10  hover:bg-gray-600 text-white rounded-md"
+                                    title="Record voice"
+                                    aria-label="Record voice"
+                                    onClick={() => {
+                                        if (!isRightBranch) return;
+                                        console.log("Microphone pressed");
+                                    }}
+                                >
+                                    <FaMicrophone className="w-5 h-5" />
+                                </button>
+
+                                <button
+                                    type="button"
+                                    className="flex items-center justify-center px-3 h-10  hover:bg-indigo-500 text-white rounded-md"
+                                    title="Send message"
+                                    aria-label="Send message"
+                                    onClick={() => {
+                                        if (!isRightBranch) return;
+                                        console.log("Send pressed");
+                                        
+                                    }}
+                                >
+                                    <FaPaperPlane className="w-5 h-5" />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            ) : (
+                <div className="w-full h-full flex items-center flex-col justify-center space-y-8">
+                    <h1 className="mx-20 text-white 2xl:text-6xl xl:text-5xl lg:text-4xl md:text-3xl sm:text-lg text-lg text-center">Hello. How can I assist you today?</h1>
+                    <div className="w-[calc(100%_-_2.5rem)] 2xl:max-w-6xl xl:max-w-4xl lg:max-w-3xl md:max-w-2xl sm:max-w-lg max-w-80 max-h-90 rounded-md p-4 mx-auto bg-gray-800">
+                        <div className="flex items-center space-x-2 ">
+                            
+                            <div className="flex-shrink-0">
+                                <label htmlFor="chat-file-input" className="flex items-center justify-center w-10 h-10 hover:bg-gray-600 text-white rounded-md cursor-pointer select-none" title="Add files" aria-label="Add files">
+                                    <FaPlus className="w-5 h-5" />
+                                </label>
+                                <input
+                                    id="chat-file-input"
+                                    type="file"
+                                    multiple
+                                    className="hidden"
+                                    onChange={(e) => {
+                                        const files = e.currentTarget.files;
+                                        if (!files) return;
+                                        console.log("Files selected:", files);
+                                        
+                                    }}
+                                />
+                            </div>
+
+                        
+                            <div className="flex flex-1 items-center">
+                                <textarea
+                                    className="w-full bg-gray-800 max-h-80 text-white px-2 conversations-scroll rounded-md resize-none overflow-y-auto focus:outline-none placeholder-gray-400"
+                                    placeholder="Type your request..."
+                                    onInput={(e) => {
+                                        const el = e.currentTarget as HTMLTextAreaElement;
+                                        el.style.height = "auto";
+                                        el.style.height = `${el.scrollHeight}px`;
+                                    }}
+                                    rows={1}
+                                    style={{ paddingTop: 0, paddingBottom: 0 }}
+                                />
+                            </div>
+
+
+                            <div className="flex-shrink-0 flex items-center 2xl:space-x-2 xl:space-x-2 lg:space-x-2 md:space-x-2">
+                                <button
+                                    type="button"
+                                    className="flex items-center justify-center w-10 h-10  hover:bg-gray-600 text-white rounded-md"
+                                    title="Record voice"
+                                    aria-label="Record voice"
+                                    onClick={() => {
+                                        console.log("Microphone pressed");
+                                    }}
+                                >
+                                    <FaMicrophone className="w-5 h-5" />
+                                </button>
+
+                                <button
+                                    type="button"
+                                    className="flex items-center justify-center px-3 h-10  hover:bg-indigo-500 text-white rounded-md"
+                                    title="Send message"
+                                    aria-label="Send message"
+                                    onClick={() => {
+                                        console.log("Send pressed");
+                                        
+                                    }}
+                                >
+                                    <FaPaperPlane className="w-5 h-5" />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                </div>
+                
+            )
+            
+        }
         </div>
      </div>
     );

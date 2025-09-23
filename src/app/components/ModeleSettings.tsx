@@ -39,7 +39,6 @@ export default function ModeleSettings() {
         }
         const valid = await isValidApiKey(key);
         const modelList = await getAvailableModelList();
-        console.log("Fetched model list:", modelList);
         setModelList(modelList);
         setIsApiKeyValid(valid ? "true" : "false");
     };
@@ -47,7 +46,6 @@ export default function ModeleSettings() {
         toggleFastModel(model);
         setFastModelList(getFastModelList());
         
-        console.log("Fast model list updated:", getFastModelList());
     }
     return (
         <div className='flex flex-col'>

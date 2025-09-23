@@ -17,7 +17,7 @@ async function ensureLanguage(lang: string) {
     return;
 }
 
-export default function ChatMessages({ thread }: { thread: Thread }) {
+export default function ChatMessages({ thread, onRightBranchChange }: { thread: Thread, onRightBranchChange?: (v: boolean) => void }) {
     const messages: Message[] = thread.messages ?? [];
 
     // build children map: parentId -> Message[] sorted by timestamp
@@ -41,6 +41,15 @@ export default function ChatMessages({ thread }: { thread: Thread }) {
     const [selection, setSelection] = useState<Record<string, number>>({});
     const [isRightBranch, setIsRightBranch] = useState(false);
 
+    // notify parent when right-branch state changes
+    useEffect(() => {
+        try {
+            if (typeof onRightBranchChange === 'function') onRightBranchChange(isRightBranch);
+        } catch (e) {
+            // ignore
+        }
+    }, [isRightBranch, onRightBranchChange]);
+
     // compute branch following selection (defaults to 0 when missing)
     function computeBranch(sel: Record<string, number>) {
         const branch: Message[] = [];
@@ -62,23 +71,41 @@ export default function ChatMessages({ thread }: { thread: Thread }) {
 
     const { branch } = useMemo(() => computeBranch(selection), [childrenMap, selection]);
     
-    function jumpToRightmostBranch() {
-        const newSel: Record<string, number> = {};
-        let parent = 'root';
-        while (true) {
-            const arr = childrenMap.get(parent);
-            if (!arr || arr.length === 0) break;
-            const lastIdx = arr.length - 1;
-            newSel[parent] = lastIdx;
-            const msg = arr[lastIdx];
-            if (!msg) break;
-            parent = msg.id;
+    function jumpToMostRecentMessage() {
+        if (!messages || messages.length === 0) {
+            setSelection({});
+            setIsRightBranch(true);
+            return;
         }
+
+        // find the most recent message by timestamp
+        let mostRecent = messages[0];
+        for (const m of messages) {
+            if ((m.timestamp?.getTime?.() ?? 0) > (mostRecent.timestamp?.getTime?.() ?? 0)) {
+                mostRecent = m;
+            }
+        }
+
+        // walk up from the most recent message to root, recording indexes in each parent
+        const newSel: Record<string, number> = {};
+        let cur: Message | undefined = mostRecent;
+        while (cur) {
+            const parentId : string = cur.parentId && cur.parentId.length > 0 ? cur.parentId : 'root';
+            const siblings = childrenMap.get(parentId) ?? [];
+            const idx = siblings.findIndex(s => s.id === cur!.id);
+            if (idx >= 0) newSel[parentId] = idx;
+
+            if (parentId === 'root') break;
+            cur = messages.find(m => m.id === parentId);
+            if (!cur) break;
+        }
+
         setSelection(newSel);
+        setIsRightBranch(isAtRightmostBranch(newSel, childrenMap));
     }
     useEffect(() => {
         if ((messages?.length ?? 0) > 0) {
-            jumpToRightmostBranch();
+            jumpToMostRecentMessage();
         }
     }, [childrenMap, messages.length]);
 

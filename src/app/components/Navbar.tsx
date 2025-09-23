@@ -1,5 +1,6 @@
 "use client";
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { FaPlus, FaPencilAlt } from "react-icons/fa";
 import { TbLayoutSidebarLeftCollapse, TbLayoutSidebarLeftExpand } from "react-icons/tb";
 import { FaMagnifyingGlass, FaDoorOpen } from "react-icons/fa6";
@@ -14,12 +15,33 @@ export default function Navbar() {
     const [menuOpen, setMenuOpen] = useState(false);
     const [navbarOpen, setNavbarOpen] = useState(true);
     const [showCollapsedButton, setShowCollapsedButton] = useState(false);
+    const [user, setUser] = useState<{ id: string; name: string; picture?: string } | null | undefined>(undefined);
+    const router = useRouter();
     const waitingForOpenRef = useRef(false);
     const detailsRef = useRef<HTMLDetailsElement | null>(null);
     const [showSettings, setShowSettings] = useState(false);
     const [showSearch, setShowSearch] = useState(false);
     const navAnimate = navbarOpen ? { x: 0, opacity: 1 } : { x: -280, opacity: 0 };
-
+    
+    useEffect(() => {
+        let cancelled = false;
+        async function loadUser() {
+            try {
+                const res = await fetch('/api/user', { method: 'GET' });
+                if (!res.ok) {
+                    if (!cancelled) router.replace('/login');
+                    return;
+                }
+                const data = await res.json();
+                if (!cancelled) setUser(data ?? null);
+            } catch (err) {
+                console.error('Failed to load user', err);
+                if (!cancelled) router.replace('/login');
+            }
+        }
+        void loadUser();
+        return () => { cancelled = true; };
+    }, [router]);
     return (
         <>
             <div className="fixed top-4 left-4 z-100"> 
@@ -195,8 +217,8 @@ export default function Navbar() {
                     aria-label="User menu"
                 >
                     <summary className="list-none w-full p-2 rounded-md hover:bg-gray-600 flex items-center cursor-pointer" role="button">
-                        <img src="https://placehold.co/32x32" alt="User Avatar" className="w-6 h-6 rounded-full mr-2" />
-                        <span className="text-sm">Username</span>
+                        <img src={user?.picture ?? 'https://placehold.co/32x32'} alt="User Avatar" className="w-6 h-6 rounded-full mr-2" />
+                        <span className="text-sm">{user?.name ?? 'Username'}</span>
                         <IoMdArrowDropdown className={`ml-auto text-gray-400 select-none transform transition-transform duration-200 ${menuOpen ? 'rotate-180' : ''}`} />
                     </summary>
 

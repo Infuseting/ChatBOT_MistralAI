@@ -14,29 +14,22 @@ export default function Home() {
     try {
       const marker = readOpenThreadMarker();
       if (marker) {
-        // try cached thread first
         const cached = readThreadCache(marker.id);
         if (cached) {
           setActualThread(cached);
-          // navigate to the original path containing the code
           router.replace(marker.path);
           return;
         }
-
-        // try to find in provider
         const found = findThreadById(marker.id);
         if (found) {
           setActualThread(found);
           router.replace(marker.path);
           return;
         }
-        // otherwise fallthrough to create a fresh thread at /
       }
 
-      // default: create and set a fresh local thread when opening /
       newThread();
     } catch (e) {
-      // ignore in case functions aren't available server-side
     }
   }, []);
 

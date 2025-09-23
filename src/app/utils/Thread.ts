@@ -1,7 +1,9 @@
 import { getContext } from './Context';
+import { Message } from './Message';
 import { Messages } from './Messages';
 import { getAvailableModelList, getActualModel } from './Models';
-import { toast } from 'react-toastify';
+import { Mistral } from '@mistralai/mistralai';
+import { getApiKey } from './ApiKey';
 
 type Thread = { id: string; name: string, date?: Date, messages?: Messages, status?: 'local' | 'remote' | 'unknown', context : string, model?: string, share: boolean };
 
@@ -196,5 +198,119 @@ export function getActualThread() : Thread | null {
         }
     }
     return thread;
+}
+
+function updateActualThread() {
+    const ev = new CustomEvent('updateActualThread', { });
+    window.dispatchEvent(ev);
+}
+
+
+
+export async function handleMessageSend(thread: Thread, lastMessage : Message | null | undefined, content: string) {
+
+    const history = getHistory(thread, lastMessage).slice(-20);
+    const userMessage: Message = {
+        id: generateUUID() ?? '',
+        text: content,
+        thinking : "",
+        sender: 'user',
+        timestamp: new Date(),
+        parentId: lastMessage?.id ?? 'root'
+    };
+    const newMessage: Message = {
+        id: generateUUID(),
+        text: '...',
+        thinking : '',
+        sender: 'assistant',
+        timestamp: new Date(),
+        parentId: userMessage?.id ?? 'root'
+    }
+    updateActualThread();
+    thread.messages = [...(thread.messages ?? []), userMessage];
+        
+    const client = new Mistral({apiKey: getApiKey()});
+
+    const messagesList = [
+            {
+                role: "system",
+                content: thread.context || getContext() || "You are a helpful assistant."
+            },
+            ...history,
+            {
+                role: "user",
+                content: content
+            },
+        ];
+
+    const chatResponse = await client.chat.complete({
+        model: thread.model || getActualModel(),
+        messages: messagesList as any,
+    });
+    const choice = chatResponse.choices[0];
+    let finalText = "";
+    const msgContent: unknown = choice?.message?.content ?? "";
+    if (Array.isArray(msgContent)) {
+        finalText = (msgContent as Array<{ type?: string; text?: string }>)
+            .filter((block) => block?.type === "text")
+            .map((block) => block?.text ?? "")
+            .join("\n");
+    } else if (typeof msgContent === "string") {
+        finalText = msgContent;
+    }
+    let reasoning = "";
+    const thinkingField: unknown = (choice as any)?.thinking ?? "";
+    if (Array.isArray(thinkingField)) {
+        reasoning = (thinkingField as Array<{ type?: string; thinking?: string }>)
+            .filter((block) => block?.type === "thinking")
+            .map((block) => block?.thinking ?? "")
+            .join("\n");
+    } else if (typeof thinkingField === "string") {
+        reasoning = thinkingField;
+    }
+    newMessage.text = finalText;
+    newMessage.thinking = reasoning;
+    newMessage.timestamp = new Date();
+    thread.messages = [...(thread.messages ?? []), newMessage];
+    updateActualThread();
+
+    
+}
+
+
+export function getHistory(thread: Thread, lastMessage?: Message | null): any[] {
+    try {
+        const msgs = (thread.messages ?? []) as any[];
+
+        // find index of lastMessage if provided
+        let endIndex = msgs.length - 1;
+        if (lastMessage) {
+            const idxById = (m: any) => (m && typeof m.id !== 'undefined' && (lastMessage as any).id !== 'undefined' && m.id === (lastMessage as any).id);
+            const idx = msgs.findIndex(m => m === lastMessage || idxById(m));
+            if (idx !== -1) endIndex = idx;
+        }
+
+        // slice from start to the lastMessage (inclusive)
+        const slice = msgs.slice(0, endIndex + 1);
+
+        // helper to format a message into text
+        const format = (m: any) => {
+            if (!m) return '';
+            if (typeof m === 'string') return m;
+            const content = typeof m.content === 'string' ? m.content : (m.text ?? m.body ?? JSON.stringify(m));
+            const role = m.role || m.sender || m.from || m.author;
+            return role ? {role, content} : {content};
+        };
+
+        const parts: any[] = [];
+        for (const m of slice) {
+            const f = format(m);
+            if (f) parts.push(f);
+        }
+
+        return parts;   
+    } catch (e) {
+        return [];
+    }
 }
 export type { Thread };

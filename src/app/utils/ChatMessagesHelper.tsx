@@ -50,6 +50,8 @@ export function parseMarkdown(text: string) {
             }
         }
 
+        
+
         // block-level parsing
         const blocks: string[] = [];
         for (let i = 0; i < filteredLines.length; i++) {
@@ -214,4 +216,25 @@ export function parseMarkdown(text: string) {
         // final simple sanitization: allow only our generated tags by escaping stray angle brackets (we already escaped content before)
         // return as React node with HTML
         return React.createElement("span", { dangerouslySetInnerHTML: { __html: html } });
+    }
+
+    /**
+     * Return the last Message shown in the current branch defined by `sel` and `childrenMap`.
+     * If there is no message in the branch, returns null.
+     */
+    export function getLastMessageOfBranch(sel: Record<string, number>, childrenMap: Map<string, Message[]>) {
+        const branch: Message[] = [];
+        let parent = 'root';
+        while (true) {
+            const arr = childrenMap.get(parent);
+            if (!arr || arr.length === 0) break;
+            const idx = sel[parent] ?? 0;
+            const safeIdx = Math.max(0, Math.min(idx, arr.length - 1));
+            const msg = arr[safeIdx];
+            if (!msg) break;
+            branch.push(msg);
+            parent = msg.id;
+        }
+        if (branch.length === 0) return null;
+        return branch[branch.length - 1];
     }

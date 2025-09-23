@@ -1,7 +1,8 @@
 "use client"
 import { IoMdSettings, IoMdShareAlt } from "react-icons/io";
 import { motion } from "motion/react";
-import { getActualThread, getShareLink, Thread } from "../utils/Thread";
+import { getActualThread, getShareLink, handleMessageSend, Thread } from "../utils/Thread";
+import { Message } from "../utils/Message";
 import { toast, Bounce } from "react-toastify";
 import { useState, useRef, useEffect } from "react";
 import { FaPlus, FaMicrophone, FaPaperPlane } from "react-icons/fa";
@@ -58,28 +59,39 @@ export default function Chatbot() {
     const [dropdownMenuOpen, setDropdownMenuOpen] = useState(false);
     const [modelPanelOpen, setModelPanelOpen] = useState(false);
     const [contextModalOpen, setContextModalOpen] = useState(false);
+    // toggle to force an invisible re-render when needed
+    const [refreshToggle, setRefreshToggle] = useState(false);
     const [actualModel, setActualModelState] = useState<string | null>(null);
     const [models, setModels] = useState<string[]>([]);
     const [actualThread, setActualThread] = useState<Thread | null>(getActualThread());
+    const lastMessage: Message | null = (actualThread && (actualThread.messages ?? []).length > 0) ? (actualThread.messages as Message[])[(actualThread.messages as Message[]).length - 1] : null;
+    const [isRightBranch, setIsRightBranch] = useState<boolean>(true);
+    
     
     const menuRef = useRef<HTMLDivElement | null>(null);
     const firstItemRef = useRef<HTMLButtonElement | null>(null);
     const messagesWrapperRef = useRef<HTMLDivElement | null>(null);
     const inputBarRef = useRef<HTMLDivElement | null>(null);
-    function handleDropdownMenu() {
-        if (actualThread === null) {toast.error('Aucun thread ouvert', {
-            position: "bottom-right",
-            autoClose: 5000,
-            hideProgressBar: false,
-            closeOnClick: false,
-            pauseOnHover: true,
-            draggable: true,
-            progress: undefined,
-            theme: "dark",
-            transition: Bounce,
-        }); return;}
-        setDropdownMenuOpen((v) => !v); 
-    }
+    function handleDropdown(thread : Thread | null) {
+            // Toggle an invisible state to force a re-render when needed.
+            // This state does not affect visible UI directly.
+            if (!thread) {
+                toast.error('Aucun thread ouvert', {
+                    position: "bottom-right",
+                    autoClose: 5000,
+                    hideProgressBar: false,
+                    closeOnClick: false,
+                    pauseOnHover: true,
+                    draggable: true,
+                    progress: undefined,
+                    theme: "dark",
+                    transition: Bounce,
+                });
+                return;
+            }
+            setDropdownMenuOpen(prev => !prev);
+            setRefreshToggle(prev => !prev);
+        }
     useEffect(() => {
         try {
             setActualModelState(getActualModel());
@@ -103,10 +115,19 @@ export default function Chatbot() {
                 setActualThread(getActualThread());
             }
         }
+    
+
         window.addEventListener('fastModelListUpdated', onFastModelListUpdated);
         window.addEventListener('actualThreadUpdated', onActualThreadUpdated as EventListener);
+        window.addEventListener('updateActualThread', () => {
+            setRefreshToggle(prev => !prev);            
+        } );
+
         return () => {
             window.removeEventListener('fastModelListUpdated', onFastModelListUpdated);
+            window.removeEventListener('updateActualThread', () => {
+                setRefreshToggle(prev => !prev);                
+            });
             window.removeEventListener('actualThreadUpdated', onActualThreadUpdated as EventListener);
         };
     }, []);
@@ -184,6 +205,8 @@ export default function Chatbot() {
         const parentEl = messagesWrapperRef.current;
         parentEl?.addEventListener('scroll', onScrollOrResize);
 
+        
+
         const mo = new MutationObserver(onScrollOrResize);
         mo.observe(document.body, { attributes: true, childList: true, subtree: true });
 
@@ -198,12 +221,12 @@ export default function Chatbot() {
 
   return (
      <div className="w-full h-full bg-gray-700">
-        <div className="absolute top-0 flex flex-row right-0 m-4 space-x-2">
+        <div className="absolute top-0 flex flex-row z-100 right-0 m-4 space-x-2">
             <motion.div onClick={handleShare} className="flex bg-gray-800 p-2 text-white rounded-lg shadow-lg cursor-pointer" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                 <IoMdShareAlt className="w-6 h-6" />
             </motion.div>
             <div className="relative">
-                <motion.div onClick={() => {handleDropdownMenu()}} className="flex bg-gray-800 p-2 text-white rounded-lg shadow-lg cursor-pointer" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                <motion.div onClick={() => {handleDropdown(getActualThread())}} className="flex bg-gray-800 p-2 text-white rounded-lg shadow-lg cursor-pointer" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                     <IoMdSettings className="w-6 h-6" />
                 </motion.div>
 
@@ -247,14 +270,16 @@ export default function Chatbot() {
 
         </div>
         <div className="h-full">
-        {
+    {/* Invisible element tied to refreshToggle to force re-renders without changing UI */}
+    <span aria-hidden="true" style={{ display: 'none' }}>{String(refreshToggle)}</span>
+        {  
             actualThread === null ? (
                 <div className="mx-20 h-full flex items-center justify-center">
                     <p className="text-gray-300 text-lg text-center">No thread selected. Please create or select a thread to start chatting.</p>
                 </div>
             ) : ((actualThread?.messages?.length ?? 0) > 0) ? (
                 <div ref={messagesWrapperRef} className="h-full overflow-auto relative">
-                    <ChatMessages thread={actualThread}/>
+                    <ChatMessages thread={actualThread} onRightBranchChange={setIsRightBranch} />
                     {/* Centered fixed input bar */}
                     <div ref={inputBarRef} className="fixed bottom-0 transform -translate-x-1/2 pb-4 bg-gray-700 pointer-events-auto mx-auto w-[calc(100%_-_2.5rem)] 2xl:max-w-6xl xl:max-w-4xl lg:max-w-3xl md:max-w-2xl sm:max-w-lg max-w-80 max-h-90" style={{ left: '50%' }}>
                         <div className="flex items-center space-x-2 p-4 bg-gray-800 rounded-md shadow-lg ">
@@ -280,13 +305,42 @@ export default function Chatbot() {
                         
                             <div className="flex flex-1 items-center">
                                 <textarea
+                                    id="chat-input"
                                     className="w-full bg-gray-800 max-h-80 text-white px-2 conversations-scroll rounded-md resize-none overflow-y-auto focus:outline-none placeholder-gray-400"
                                     placeholder={`${!isRightBranch ? "You need to be on the right branch to type your request..." : "Type your request..."}`}
                                     onInput={(e) => {
+                                        
                                         const el = e.currentTarget as HTMLTextAreaElement;
                                         el.style.height = "auto";
                                         el.style.height = `${el.scrollHeight}px`;
                                     }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            const value = (document.getElementById("chat-input") as HTMLTextAreaElement)?.value || "";
+                                            if (value.trim().length === 0) {
+                                                toast.error(`Vous devez entrer un message avant d'envoyer`, {
+                                                    position: "bottom-right",
+                                                    autoClose: 5000,
+                                                    hideProgressBar: false,
+                                                    closeOnClick: false,
+                                                    pauseOnHover: true,
+                                                    draggable: true,
+                                                    progress: undefined,
+                                                    theme: "dark",
+                                                    transition: Bounce,
+                                                }); return;
+
+                                            };
+                                            (document.getElementById("chat-input") as HTMLTextAreaElement).value = "";
+                                            handleMessageSend(actualThread, lastMessage ?? undefined, value);
+                                            const el = e.currentTarget as HTMLTextAreaElement;
+                                            el.style.height = "auto";
+                                            el.style.height = `${el.scrollHeight}px`;
+                                        }
+                                    }}
+                                    disabled={!isRightBranch}
+                                    
                                     rows={1}
                                     style={{ paddingTop: 0, paddingBottom: 0 }}
                                 />
@@ -311,12 +365,28 @@ export default function Chatbot() {
                                     type="button"
                                     className="flex items-center justify-center px-3 h-10  hover:bg-indigo-500 text-white rounded-md"
                                     title="Send message"
+                                    disabled={!isRightBranch}
                                     aria-label="Send message"
                                     onClick={() => {
                                         if (!isRightBranch) return;
-                                        console.log("Send pressed");
-                                        
+                                        const value = (document.getElementById("chat-input") as HTMLTextAreaElement)?.value || "";
+                                        if (value.trim().length === 0) {
+                                            toast.error(`Vous devez entrer un message avant d'envoyer`, {
+                                                position: "bottom-right",
+                                                autoClose: 5000,
+                                                hideProgressBar: false,
+                                                closeOnClick: false,
+                                                pauseOnHover: true,
+                                                draggable: true,
+                                                progress: undefined,
+                                                theme: "dark",
+                                                transition: Bounce,
+                                            }); return;
+                                        };
+                                        (document.getElementById("chat-input") as HTMLTextAreaElement).value = "";
+                                        handleMessageSend(actualThread, lastMessage ?? undefined, value);
                                     }}
+                                    
                                 >
                                     <FaPaperPlane className="w-5 h-5" />
                                 </button>
@@ -351,13 +421,41 @@ export default function Chatbot() {
                         
                             <div className="flex flex-1 items-center">
                                 <textarea
+                                    id="chat-input"
                                     className="w-full bg-gray-800 max-h-80 text-white px-2 conversations-scroll rounded-md resize-none overflow-y-auto focus:outline-none placeholder-gray-400"
                                     placeholder="Type your request..."
                                     onInput={(e) => {
                                         const el = e.currentTarget as HTMLTextAreaElement;
                                         el.style.height = "auto";
                                         el.style.height = `${el.scrollHeight}px`;
+                                        
                                     }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            const value = (document.getElementById("chat-input") as HTMLTextAreaElement)?.value || "";
+                                            if (value.trim().length === 0) {
+                                                toast.error(`Vous devez entrer un message avant d'envoyer`, {
+                                                    position: "bottom-right",
+                                                    autoClose: 5000,
+                                                    hideProgressBar: false,
+                                                    closeOnClick: false,
+                                                    pauseOnHover: true,
+                                                    draggable: true,
+                                                    progress: undefined,
+                                                    theme: "dark",
+                                                    transition: Bounce,
+                                                }); return;
+
+                                            };
+                                            (document.getElementById("chat-input") as HTMLTextAreaElement).value = "";
+                                            handleMessageSend(actualThread, lastMessage ?? undefined, value);
+                                            const el = e.currentTarget as HTMLTextAreaElement;
+                                            el.style.height = "auto";
+                                            el.style.height = `${el.scrollHeight}px`;
+                                        }
+                                    }}
+                                    disabled={!isRightBranch}
                                     rows={1}
                                     style={{ paddingTop: 0, paddingBottom: 0 }}
                                 />
@@ -382,9 +480,24 @@ export default function Chatbot() {
                                     className="flex items-center justify-center px-3 h-10  hover:bg-indigo-500 text-white rounded-md"
                                     title="Send message"
                                     aria-label="Send message"
+                                    disabled={!isRightBranch}
                                     onClick={() => {
-                                        console.log("Send pressed");
-                                        
+                                        const value = (document.getElementById("chat-input") as HTMLTextAreaElement)?.value || "";
+                                        if (value.trim().length === 0) {
+                                            toast.error(`Vous devez entrer un message avant d'envoyer`, {
+                                                position: "bottom-right",
+                                                autoClose: 5000,
+                                                hideProgressBar: false,
+                                                closeOnClick: false,
+                                                pauseOnHover: true,
+                                                draggable: true,
+                                                progress: undefined,
+                                                theme: "dark",
+                                                transition: Bounce,
+                                            }); return;
+                                        };
+                                        (document.getElementById("chat-input") as HTMLTextAreaElement).value = "";
+                                        handleMessageSend(actualThread, lastMessage ?? undefined, value);
                                     }}
                                 >
                                     <FaPaperPlane className="w-5 h-5" />

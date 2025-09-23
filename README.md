@@ -34,3 +34,29 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Prisma schema and database
+
+This project uses Prisma. I added models for User, Thread, Message, AccessToken and Share to `prisma/schema.prisma`.
+
+To generate the Prisma client and create the database migration, set your `DATABASE_URL` in the environment, then run:
+
+```powershell
+npm run prisma:generate
+npm run prisma:migrate
+```
+
+Commands in package.json:
+
+- `prisma:generate` → runs `prisma generate` and updates `@prisma/client` types.
+- `prisma:migrate` → runs `prisma migrate dev --name init` to create and apply a migration.
+
+Models summary:
+
+- User: id (uuid), name, avatar (optional), createdAt, relations to threads, access tokens and shares.
+- Thread: id (uuid), idThread (unique string), name, context, model, createdAt, updatedAt, relation to messages and owner user.
+- Message: id (uuid), idMessage (unique string), thinkin (text), sender (enum: user|assistant), sentAt, parentId (self-relation), threadId.
+- AccessToken: id, token (unique), userId, createdAt, expiresAt.
+- Share: id, code (unique), optional threadId, optional userId, createdAt, expiresAt, clicks.
+
+After running migrations, you can use the Prisma client from `src/lib/prisma.ts` (exported as `prisma`).

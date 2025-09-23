@@ -14,10 +14,10 @@ enum Sender {
 
 model User {
   id        String   @id @default(uuid())
-  name      String
+  name      String   @db.LongText
   email     String?  @unique
   googleId  String?  @unique
-  avatar    String?
+  avatar    String?  @db.LongText
   createdAt DateTime @default(now())
 
   threads      Thread[]
@@ -28,9 +28,9 @@ model User {
 model Thread {
   id        String    @id @default(uuid())
   idThread  String    @unique
-  name      String
-  context   String?
-  model     String?
+  name      String   @db.LongText
+  context   String?  @db.LongText
+  model     String?  @db.LongText
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   user      User      @relation(fields: [userId], references: [id])
@@ -42,18 +42,15 @@ model Thread {
 model Message {
   id        String   @id @default(uuid())
   idMessage String   @unique
-  thinking  String
+  thinking  String   @db.LongText
+  text      String   @db.LongText
   sender    Sender
   sentAt    DateTime @default(now())
 
-  parent   Message? @relation("MessageParent", fields: [parentId], references: [id])
-  parentId String?
+  parentId String? @db.LongText
 
-  // opposite relation for self-relation (children messages)
-  children Message[] @relation("MessageParent")
-
-  thread   Thread @relation(fields: [threadId], references: [id])
-  threadId String
+  thread   Thread @relation(fields: [idThread], references: [id])
+  idThread String
 }
 
 model AccessToken {

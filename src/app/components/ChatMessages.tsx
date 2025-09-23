@@ -3,19 +3,8 @@ import { Message } from "../utils/Message";
 import { parseMarkdown, isAtRightmostBranch } from "../utils/ChatMessagesHelper";
 
 import React, { useMemo, useState, useEffect, useRef } from "react";
-import 'highlight.js/styles/github-dark.css';
-let _hljs: any = null;
-const _registered = new Set<string>();
-async function loadHljs() {
-    if (_hljs) return _hljs;
-    const mod = await import('highlight.js');
-    _hljs = (mod && (mod.default ?? mod)) as any;
-    return _hljs;
-}
-async function ensureLanguage(lang: string) {
-    // no-op when using the full highlight.js bundle (languages included)
-    return;
-}
+import { toast, Bounce } from 'react-toastify';
+
 
 export default function ChatMessages({ thread, onRightBranchChange }: { thread: Thread, onRightBranchChange?: (v: boolean) => void }) {
     const messages: Message[] = thread.messages ?? [];
@@ -49,6 +38,49 @@ export default function ChatMessages({ thread, onRightBranchChange }: { thread: 
             // ignore
         }
     }, [isRightBranch, onRightBranchChange]);
+
+    useEffect(() => {
+        try {
+            (window as any).handleCopyCode = async (code: string) => {
+                try {
+                    const decoded = decodeURIComponent(code);
+                    await navigator.clipboard.writeText(decoded);
+                    try {
+                        toast.success('Code copied to clipboard!', {
+                            position: "bottom-right",
+                            autoClose: 5000,
+                            hideProgressBar: false,
+                            closeOnClick: false,
+                            pauseOnHover: true,
+                            draggable: true,
+                            progress: undefined,
+                            theme: "dark",
+                            transition: Bounce,
+                        });
+                    } catch (e) {}
+                } catch (err) {
+                    console.error('Failed to copy code', err);
+                    try {
+                        toast.error('Failed to copy code', {
+                            position: "bottom-right",
+                            autoClose: 5000,
+                            hideProgressBar: false,
+                            closeOnClick: false,
+                            pauseOnHover: true,
+                            draggable: true,
+                            progress: undefined,
+                            theme: "dark",
+                            transition: Bounce,
+                        });
+                    } catch (e) {}
+                }
+            };
+        } catch (e) {
+        }
+        return () => {
+            try { delete (window as any).handleCopyCode; } catch (e) {}
+        };
+    }, []);
 
     // compute branch following selection (defaults to 0 when missing)
     function computeBranch(sel: Record<string, number>) {
@@ -121,50 +153,16 @@ export default function ChatMessages({ thread, onRightBranchChange }: { thread: 
         
         setSelection(filtered);
     }
+
+    
     
 
     // after render, find code blocks emitted by parseMarkdown and highlight them lazily
-    const containerRef = useRef<HTMLDivElement | null>(null);
-    useEffect(() => {
-        let cancelled = false;
-        async function runHighlight() {
-            if (cancelled) return;
-            const root = containerRef.current;
-            if (!root) return;
-            const codeEls = Array.from(root.querySelectorAll('pre code[data-raw]')) as HTMLElement[];
-            if (codeEls.length === 0) return;
-            const hljs = await loadHljs().catch(() => null);
-            if (!hljs) return;
-            for (const el of codeEls) {
-                if (cancelled) break;
-                try {
-                    const raw = el.getAttribute('data-raw') ?? '';
-                    const lang = (el.getAttribute('data-lang') ?? '').toLowerCase();
-                    if (lang) {
-                        await ensureLanguage(lang);
-                        if (_hljs && _hljs.getLanguage(lang)) {
-                            const res = _hljs.highlight(raw, { language: lang, ignoreIllegals: true });
-                            el.innerHTML = res.value;
-                            el.classList.add(`language-${lang}`);
-                            continue;
-                        }
-                    }
-                    // fallback to auto-detect
-                    const auto = _hljs.highlightAuto(raw);
-                    el.innerHTML = auto.value;
-                } catch (err) {
-                    // leave escaped text as-is on error
-                }
-            }
-        }
-        // run async but not blocking render
-        void runHighlight();
-        return () => { cancelled = true; };
-    }, [branch]);
+    
     
 
     return (
-        <div ref={containerRef} className="flex flex-col space-y-4 p-4 overflow-y-auto px-80 conversations-scroll">
+        <div className="flex flex-col space-y-4 p-4 px-80">
             {/* root navigator if multiple root children */}
             <div className="flex items-center justify-between">
                 {(() => {
@@ -184,7 +182,7 @@ export default function ChatMessages({ thread, onRightBranchChange }: { thread: 
             {/* render branch messages */}
             {branch.map((m, i) => (
                 <div key={m.id} className={`${i === 0 ? 'mt-[15%]' : i === branch.length - 1 ? 'mb-[40%]' : ''} ${m.sender === 'assistant' ? "max-w-[100%]" : "max-w-[80%]"} p-3 rounded-md ${m.sender === 'user' ? 'self-end bg-indigo-600 text-white' : 'self-star text-white'}`}>
-                    <div className="text-sm whitespace-pre-wrap">{parseMarkdown(m.text)}</div>
+                    <div className="text-lg">{parseMarkdown(m.text)}</div>
                     {/* if this message has multiple children, show navigator */}
                     {(() => {
                         const children = childrenMap.get(m.id) ?? [];

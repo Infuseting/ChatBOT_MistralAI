@@ -21,16 +21,33 @@
 }
 
 .conversations-scroll {
+  /* Firefox */
   scrollbar-width: thin;
-  scrollbar-color: #374151 transparent;
+  scrollbar-color: #303845 transparent;
+
+  /* IE / legacy Edge */
+  -ms-overflow-style: -ms-autohiding-scrollbar;
 }
-.conversations-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
-.conversations-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* WebKit (Chrome, Safari, new Edge) */
+.conversations-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.conversations-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
 .conversations-scroll::-webkit-scrollbar-thumb {
-  background-color: #374151;
+  background-color: #0062ff;
   border-radius: 9999px;
   border: 2px solid transparent;
   background-clip: padding-box;
+}
+.conversations-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: #006aff;
+}
+.conversations-scroll::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 body {

@@ -168,7 +168,7 @@ export default function ChatMessages({ thread, onRightBranchChange }: { thread: 
     
 
     return (
-        <div className="flex flex-col space-y-4 p-4 px-80">
+        <div className="flex flex-col space-y-4 p-4 lg:max-w-220 md:max-w-160 max-w-80 mx-auto">
             {/* root navigator if multiple root children */}
             <div className="flex items-center justify-between">
                 {(() => {
@@ -187,7 +187,7 @@ export default function ChatMessages({ thread, onRightBranchChange }: { thread: 
 
             {/* render branch messages */}
             {branch.map((m, i) => (
-                <div key={m.id} className={`${i === 0 ? 'mt-[15%]' : i === branch.length - 1 ? 'mb-[40%]' : ''} ${m.sender === 'assistant' ? "max-w-[100%]" : "max-w-[80%]"} p-3 rounded-md ${m.sender === 'user' ? 'self-end bg-indigo-600 text-white' : 'self-star text-white'}`}>
+                <div key={m.id} className={`${i === 0 ? 'mt-[15%]' : i === branch.length - 1 ? '2xl:mb-[10%] xl:mb-[10%] lg:mb-[10%] md:mb-[10%] sm:mb-[35%] mb-[40%]' : ''} ${m.sender === 'assistant' ? "max-w-[100%]" : "max-w-[80%]"} p-3 rounded-md ${m.sender === 'user' ? 'self-end bg-indigo-600 text-white' : 'self-star text-white'}`}>
                     <div className="text-lg">{parseMarkdown(m.text)}</div>
                     {/* if this message has multiple children, show navigator */}
                     {(() => {

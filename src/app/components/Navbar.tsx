@@ -145,13 +145,13 @@ export default function Navbar() {
             {/* small-screen backdrop: visible only on screens smaller than `sm` */}
             {navbarOpen && (
                 <div
-                    className={`fixed inset-0 z-30 bg-black/40 backdrop-blur-lg sm:hidden `}
+                    className={`fixed inset-0 z-99 bg-black/40 backdrop-blur-lg lg:hidden `}
                     onClick={() => setNavbarOpen(false)}
                 />
             )}
 
             <motion.nav
-                className={`fixed sm:relative left-0 top-0 z-40 w-64 bg-gray-800 text-white p-4 max-h-screen h-screen flex flex-col`}
+                className={`fixed lg:relative left-0 top-0 z-100 w-64 bg-gray-800 text-white p-4 max-h-screen h-screen flex flex-col`}
                 initial={false}
                 animate={navAnimate}
                 transition={{ type: 'spring', stiffness: 300, damping: 30 }}

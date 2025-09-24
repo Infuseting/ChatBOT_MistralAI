@@ -283,7 +283,7 @@ export default function Chatbot() {
 
   return (
      <div className="w-full h-full bg-gray-700">
-        <div className="absolute top-0 flex flex-row z-100 right-0 m-4 space-x-2">
+        <div className="absolute top-0 flex flex-row z-80 right-0 m-4 space-x-2">
             <motion.div onClick={handleShare} className="flex bg-gray-800 p-2 text-white rounded-lg shadow-lg cursor-pointer" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                 <IoMdShareAlt className="w-6 h-6" />
             </motion.div>
@@ -336,7 +336,7 @@ export default function Chatbot() {
     
         {  
             actualThread === null ? (
-                <div className="mx-20 h-full flex items-center justify-center">
+                <div className="mx-auto max-w-80 h-full flex items-center justify-center">
                     <p className="text-gray-300 text-lg text-center">No thread selected. Please create or select a thread to start chatting.</p>
                 </div>
             ) : ((actualThread?.messages?.length ?? 0) > 0) ? (

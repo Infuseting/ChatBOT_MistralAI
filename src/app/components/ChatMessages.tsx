@@ -1,4 +1,4 @@
-import { Thread } from "../utils/Thread";
+import { getActualThread, Thread } from "../utils/Thread";
 import { Message } from "../utils/Message";
 import { parseMarkdown, isAtRightmostBranch } from "../utils/ChatMessagesHelper";
 
@@ -7,9 +7,11 @@ import { toast, Bounce } from 'react-toastify';
 
 
 export default function ChatMessages({ thread, onRightBranchChange }: { thread: Thread, onRightBranchChange?: (v: boolean) => void }) {
-    const messages: Message[] = thread.messages ?? [];
+    const [messages, setMessages] = useState<Message[]>(thread.messages ?? []);
+    useEffect(() => {
+        setMessages(thread.messages ?? []);
+    }, [thread.messages]);
 
-    // build children map: parentId -> Message[] sorted by timestamp
     const childrenMap = useMemo(() => {
         const map = new Map<string, Message[]>();
         for (const m of messages) {
@@ -18,17 +20,16 @@ export default function ChatMessages({ thread, onRightBranchChange }: { thread: 
             arr.push(m);
             map.set(key, arr);
         }
-        // sort arrays by timestamp
+
         for (const [k, arr] of map.entries()) {
             arr.sort((a, b) => (a.timestamp?.getTime?.() ?? 0) - (b.timestamp?.getTime?.() ?? 0));
             map.set(k, arr);
         }
         return map;
     }, [messages]);
-
-    // selection index per parentId (which child is active)
     const [selection, setSelection] = useState<Record<string, number>>({});
     const [isRightBranch, setIsRightBranch] = useState(false);
+    const [refreshToggle, setRefreshToggle] = useState(false); 
 
     // notify parent when right-branch state changes
     useEffect(() => {
@@ -77,11 +78,16 @@ export default function ChatMessages({ thread, onRightBranchChange }: { thread: 
             };
         } catch (e) {
         }
+        window.addEventListener('updateActualThread', async () => { await updateThreadMessages(); });
         return () => {
+            window.removeEventListener('updateActualThread', async () => { await updateThreadMessages(); });
             try { delete (window as any).handleCopyCode; } catch (e) {}
         };
     }, []);
-
+    async function updateThreadMessages() {
+        setMessages((await getActualThread())?.messages ?? []);
+        setRefreshToggle(v => !v);        
+    }
     // compute branch following selection (defaults to 0 when missing)
     function computeBranch(sel: Record<string, number>) {
         const branch: Message[] = [];
@@ -198,6 +204,7 @@ export default function ChatMessages({ thread, onRightBranchChange }: { thread: 
                     })()}
                 </div>
             ))}
+            <span aria-hidden="true" style={{ display: 'none' }}>{String(refreshToggle)}</span>
         </div>
     );
 }

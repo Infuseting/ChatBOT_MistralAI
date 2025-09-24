@@ -4,7 +4,8 @@ type Message = {
     thinking : string,
     sender: 'user' | 'assistant',
     timestamp: Date,
-    parentId: string
+    parentId: string,
+    status : 'sync' | 'local' | undefined
 }
 
 export type { Message };

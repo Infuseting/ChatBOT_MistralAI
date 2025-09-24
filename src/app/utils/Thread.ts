@@ -165,6 +165,7 @@ export async function openSharedThread(id: string) : Promise<Thread> {
                         sender: m.sender ?? m.role ?? 'user',
                         timestamp: ts,
                         parentId: m.parentId ?? null,
+                        status: 'sync'
                     };
                 });
 
@@ -242,7 +243,6 @@ export function setActualThread(thread: Thread | null) {
 }
 export async function reloadThread() {
     try {
-        // Always use the API route from the client/runtime
         try {
             const res = await fetch('/api/thread');
             if (!res.ok) return [];
@@ -286,7 +286,8 @@ export async function reloadThread() {
                         thinking: m.thinking ?? '',
                         sender: m.sender ?? m.role ?? 'user',
                         timestamp: parseTimestamp(m.timestamp),
-                        parentId: m.parentId ?? null
+                        parentId: m.parentId ?? null,
+                        status: m.status ?? 'sync'
                     };
                 }) as any;
                 return {
@@ -301,7 +302,7 @@ export async function reloadThread() {
                 } as Thread;
             });
             try { setThreadCache(threads); } catch (e) {}
-            console.log(threads);
+        
             return threads;
         } catch (err) {
             console.error('Failed to fetch threads via API', err);
@@ -383,6 +384,7 @@ function updateActualThread() {
 
 export function getLastMessage(thread: Thread) : Message | null | undefined {
     const msgs = thread.messages ?? [];
+    console.log(msgs);
     if (msgs.length === 0) return null;
     try {
         if (msgs.length === 0) return null;
@@ -398,7 +400,6 @@ export function getLastMessage(thread: Thread) : Message | null | undefined {
         let bestTime = getTime(best);
         for (const m of msgs) {
             const t = getTime(m);
-            console.log(t, bestTime);
             if (t > bestTime) {
                 best = m;
                 bestTime = t;
@@ -420,7 +421,8 @@ export async function handleMessageSend(thread: Thread, content: string) {
         thinking : "",
         sender: 'user',
     timestamp: utcNow(),
-        parentId: lastMessage?.id ?? 'root'
+        parentId: lastMessage?.id ?? 'root',
+        status: 'local'
     };
     const newMessage: Message = {
         id: generateUUID(),
@@ -428,10 +430,11 @@ export async function handleMessageSend(thread: Thread, content: string) {
         thinking : '',
         sender: 'assistant',
     timestamp: utcNowPlus(1000),
-        parentId: userMessage?.id ?? 'root'
+        parentId: userMessage?.id ?? 'root',
+        status: 'local'
     }
-    updateActualThread();
     thread.messages = [...(thread.messages ?? []), userMessage, newMessage];
+    updateActualThread();
         
     const client = new Mistral({apiKey: getApiKey()});
 
@@ -482,15 +485,20 @@ export async function handleMessageSend(thread: Thread, content: string) {
     newMessage.thinking = reasoning;
     updateActualThread();
     if (thread.status !== 'remote') {
-        createServerThread(thread);
+        await createServerThread(thread);
     }
-    syncServerThread(thread);
+    await syncServerThread(thread);
+    updateActualThread();
     const url = `/${thread.id}`;
     if (typeof window !== 'undefined' && window.history && window.history.pushState) {
         window.history.pushState({}, '', url);
     } 
 }
 
+async function updateThreadList() {
+    const ev = new CustomEvent('updateThreadList', { });
+    window.dispatchEvent(ev);
+}
 
 
 async function createServerThread(thread: Thread) {
@@ -498,8 +506,6 @@ async function createServerThread(thread: Thread) {
         if (thread.status === 'remote') return;
         if (thread.name === defaultThreadName)
             thread.name = (await generateThreadName(thread)) || thread.name || defaultThreadName;
-
-        // Call the API route to create the thread
         try {
             const res = await fetch('/api/thread', {
                 method: 'POST',
@@ -520,9 +526,11 @@ async function createServerThread(thread: Thread) {
                 }
                 return;
             }
+
             thread.status = 'remote';
-            try { const all = readThreadCache(); const idx = all.findIndex(t => t.id === thread.id); if (idx === -1) all.push(thread); else all[idx] = thread; setThreadCache(all); } catch (e) {}
             updateActualThread();
+            updateThreadList();
+            allThreads.push(thread);
         } catch (err) {
             console.error('createServerThread API error', err);
             if (typeof window !== 'undefined') {
@@ -554,27 +562,29 @@ async function syncServerThread(thread: Thread) {
     try {
         const msgs = (thread.messages ?? []) as any[];
         if (msgs.length === 0) return;
-        const toInsert = msgs.map(m => ({
-            idMessage: m.id,
-            idThread: thread.id,
-            sender: m.sender ?? m.role ?? 'user',
-            text: m.text ?? m.content ?? '',
-            thinking: m.thinking ?? '',
-            parentId: m.parentId ?? null,
-            date: (() => {
-                const ts = m.timestamp ?? m.date ?? m.time ?? null;
-                if (ts == null) return utcNow().getTime();
-                if (typeof ts === 'number') return ts;
-                if (ts instanceof Date) return ts.getTime();
-                const parsed = Date.parse(String(ts));
-                if (!isNaN(parsed)) return parsed;
-                try {
-                    const d = ensureDate(ts);
-                    if (d instanceof Date) return d.getTime();
-                } catch {}
-                return utcNow().getTime();
-            })(),
-        }));
+        const toInsert = msgs
+            .filter(m => m.status !== 'sync')
+            .map(m => ({
+                idMessage: m.id,
+                idThread: thread.id,
+                sender: m.sender ?? m.role ?? 'user',
+                text: m.text ?? m.content ?? '',
+                thinking: m.thinking ?? '',
+                parentId: m.parentId ?? null,
+                date: (() => {
+                    const ts = m.timestamp ?? m.date ?? m.time ?? null;
+                    if (ts == null) return utcNow().getTime();
+                    if (typeof ts === 'number') return ts;
+                    if (ts instanceof Date) return ts.getTime();
+                    const parsed = Date.parse(String(ts));
+                    if (!isNaN(parsed)) return parsed;
+                    try {
+                        const d = ensureDate(ts);
+                        if (d instanceof Date) return d.getTime();
+                    } catch {}
+                    return utcNow().getTime();
+                })(),
+            }));
 
         // Call API to sync messages
         try {
@@ -586,7 +596,6 @@ async function syncServerThread(thread: Thread) {
                 return;
             }
             const json = await res.json().catch(() => ({}));
-            console.log('syncServerThread response', json);
             updateActualThread();
         } catch (err) {
             console.error('syncServerThread API error', err);

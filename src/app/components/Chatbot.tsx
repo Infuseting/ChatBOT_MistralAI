@@ -44,9 +44,9 @@ export default function Chatbot() {
         return;
     }
     try {
-        console.log("Sharing thread:", (globalThis as any).actualThread);
-        if ((globalThis as any).actualThread.status === 'remote') {
-            const shareLink : string | null = await getShareLink((globalThis as any).actualThread as Thread);
+        console.log(actualThread);
+        if (actualThread?.status === 'remote') {
+            const shareLink : string | null = await getShareLink(actualThread as Thread);
             if (shareLink === null) {
                 toast.error('Failed to generate share link', {
                     position: "bottom-right",
@@ -154,29 +154,28 @@ export default function Chatbot() {
         function onActualThreadUpdated(e: Event) {
             try {
                 const t = (e as CustomEvent).detail as Thread | null;
-                setActualThread(t ?? getActualThread());
-                console.log('Actual thread updated', t);
+
+                // 🔹 On clone le thread pour forcer React à voir un changement
+                setActualThread(t ? { ...t, messages: [...(t.messages ?? [])] } : null);
+
                 setIsShareThread(t?.share ?? false);
             } catch (err) {
-                setActualThread(getActualThread());
-                console.log('Actual thread updated', getActualThread());
+                const current = getActualThread();
+                setActualThread(current ? { ...current, messages: [...(current.messages ?? [])] } : null);
                 setIsShareThread(actualThread?.share ?? false);
             }
         }
+
     
 
         window.addEventListener('fastModelListUpdated', onFastModelListUpdated);
         window.addEventListener('actualThreadUpdated', onActualThreadUpdated as EventListener);
-        window.addEventListener('updateActualThread', () => {
-            setRefreshToggle(prev => !prev);            
-        } );
+    
 
         return () => {
             window.removeEventListener('fastModelListUpdated', onFastModelListUpdated);
-            window.removeEventListener('updateActualThread', () => {
-                setRefreshToggle(prev => !prev);                
-            });
             window.removeEventListener('actualThreadUpdated', onActualThreadUpdated as EventListener);
+        
         };
     }, []);
     
@@ -333,8 +332,8 @@ export default function Chatbot() {
 
         </div>
         <div className="h-full">
-    {/* Invisible element tied to refreshToggle to force re-renders without changing UI */}
-    <span aria-hidden="true" style={{ display: 'none' }}>{String(refreshToggle)}</span>
+        <span aria-hidden="true" style={{ display: 'none' }}>{String(refreshToggle)}</span>
+    
         {  
             actualThread === null ? (
                 <div className="mx-20 h-full flex items-center justify-center">

@@ -9,7 +9,7 @@ import UserSettingsModal from "./UserSettingsModal";
 import SearchModal from "./SearchModal";
 import { setActualThread } from "../utils/Thread";
 import { motion } from "motion/react";
-import { getThreads, newThread } from '../utils/Thread';
+import { getThreads, newThread, reloadThread } from '../utils/Thread';
 import { ensureDate } from '../utils/DateUTC';
 import { getActualThread } from '../utils/Thread';
 export default function Navbar() {
@@ -25,10 +25,8 @@ export default function Navbar() {
     const navAnimate = navbarOpen ? { x: 0, opacity: 1 } : { x: -280, opacity: 0 };
     const [threads, setThreads] = useState<any[]>([]);
     const [threadsLoaded, setThreadsLoaded] = useState(false);
-    const [debugLogs, setDebugLogs] = useState<string[]>([]);
-    function pushDebug(msg: string) {
-        setDebugLogs(prev => [msg, ...prev].slice(0, 20));
-    }
+    const [refreshToggle, setRefreshToggle] = useState(false);
+   
     function handleNewThread() {
         const actual = getActualThread();
         if (actual?.share) {
@@ -37,7 +35,7 @@ export default function Navbar() {
         }
         const t = newThread();
         setActualThread(t);
-        
+
     }
     
     function handleThreadClick(t: any) {
@@ -45,7 +43,7 @@ export default function Navbar() {
             const actual = getActualThread();
             const msg = `click thread actual=${actual?.id ?? 'null'} thread=${t?.id ?? 'unknown'}`;
             try { console.log(msg, actual, t); } catch {}
-            pushDebug(msg);
+        
         } catch (e) {
         }
         try {
@@ -60,12 +58,10 @@ export default function Navbar() {
                         router.replace(url);
                     }
                 } catch (e) {
-                    pushDebug('set url failed ' + String(e));
                 }
                 setActualThread(t as any);
             }
         } catch (e) {
-            pushDebug('handleThreadClick error ' + String(e));
         }
     }
     
@@ -107,18 +103,22 @@ export default function Navbar() {
         }
         void loadThreads();
 
-        function onActualThreadUpdated() {
+        async function onActualThreadUpdated() {
+            await reloadThread();
             void loadThreads();
         }
 
         window.addEventListener('actualThreadUpdated', onActualThreadUpdated as EventListener);
+        window.addEventListener('updateThreadList', onActualThreadUpdated as EventListener);
         return () => {
             cancelled = true;
             window.removeEventListener('actualThreadUpdated', onActualThreadUpdated as EventListener);
+            window.removeEventListener('updateThreadList', onActualThreadUpdated as EventListener);
         };
     }, []);
     return (
         <>
+        <span aria-hidden="true" style={{ display: 'none' }}>{String(refreshToggle)}</span>
             <div className="fixed top-4 left-4 z-100"> 
                 <motion.button
                     onClick={() => {

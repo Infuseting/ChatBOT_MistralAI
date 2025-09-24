@@ -1,6 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { ensureDate } from '@/app/utils/DateUTC';
+import { threadId } from 'worker_threads';
+
+function generateUUID(): string {
+  // Prefer the platform crypto.randomUUID if available, otherwise fallback to a UUIDv4 polyfill.
+  try {
+    const rnd = (globalThis as any).crypto?.randomUUID;
+    if (typeof rnd === 'function') return rnd();
+  } catch (_) {
+    // ignore and fallback
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
 
 export async function GET(_req: NextRequest) {
   try {
@@ -168,94 +184,32 @@ export async function POST(req: NextRequest) {
     if (action === 'sync') {
       const messages = body?.messages ?? [];
       if (!Array.isArray(messages)) return NextResponse.json({ error: 'Invalid messages' }, { status: 400 });
-      // ensure we map idThread -> threadId and date -> sentAt
-      try {
-        const distinctIdThreads = Array.from(new Set(messages.map((m: any) => m.idThread).filter(Boolean)));
-        const threads = await prisma.thread.findMany({ where: { idThread: { in: distinctIdThreads } }, select: { idThread: true, id: true } });
-        const mapIdThreadToId: Record<string, string> = {};
-        for (const t of threads) mapIdThreadToId[t.idThread] = t.id;
-
+      
         const mapped: any[] = [];
-        const externalParents: (string | null)[] = [];
         for (const m of messages) {
-          const threadInternalId = mapIdThreadToId[m.idThread];
-          if (!threadInternalId) {
-            console.warn('Skipping message for unknown thread idThread=', m.idThread);
-            continue;
-          }
-          console.log(m);
-          const externalParent = m.parentId ?? null;
-          externalParents.push(typeof externalParent === 'string' ? externalParent : null);
-            mapped.push({
-            idMessage: m.idMessage ?? m.id ?? undefined,
-            idThread: threadInternalId,
+          mapped.push({
+            id: generateUUID(),
+            idMessage: m.idMessage ?? undefined,
+            idThread: m.idThread ?? undefined,
             sender: m.sender ?? m.role ?? 'user',
             text: m.text ?? m.content ?? '',
             thinking: m.thinking ?? '',
-              parentId: externalParent,
-              sentAt: m.date ? ensureDate(m.date) : ensureDate(undefined)
+            parentId: m.parentId,
+            sentAt: m.date ? ensureDate(m.date) : ensureDate(undefined)
           });
         }
+        const threads = await prisma.thread.findMany();
 
        
         if (mapped.length === 0) return NextResponse.json({ ok: true, inserted: 0 });
-        console.log('Syncing messages, mapped count=', mapped.length);
-        try {
-          // Debug: check which idMessage values already exist in DB
-          try {
-            const incomingIds = mapped.map(m => m.idMessage).filter(Boolean);
-            if (incomingIds.length > 0) {
-              const existing = await prisma.message.findMany({ where: { idMessage: { in: incomingIds } }, select: { idMessage: true, id: true, idThread: true } });
-              console.log('Existing messages with same idMessage:', existing);
-              if (process.env.NODE_ENV !== 'production') {
-                // attach debug info to response when not in production
-                const result = await prisma.message.createMany({ data: mapped, skipDuplicates: true });
-                const inserted = (result && typeof (result as any).count === 'number') ? (result as any).count : undefined;
-                console.log('prisma.message.createMany result', result);
-                return NextResponse.json({ ok: true, inserted, existing, mappedCount: mapped.length });
-              }
-            }
-          } catch (dbgErr) {
-            console.error('debug check for existing messages failed', dbgErr);
-          }
 
-          const result = await prisma.message.createMany({ data: mapped, skipDuplicates: true });
-          const inserted = (result && typeof (result as any).count === 'number') ? (result as any).count : 0;
-          console.log('prisma.message.createMany result', result);
+        const result = await prisma.message.createMany({
+          data: mapped,
+          skipDuplicates: true,
+        });
 
-          // If createMany inserted 0 rows, fall back to per-row insertion to surface errors
-          if (!inserted) {
-            const perRowErrors: any[] = [];
-            let success = 0;
-            for (const row of mapped) {
-              try {
-                await prisma.message.create({ data: row });
-                success++;
-              } catch (e: any) {
-                perRowErrors.push({ row, error: (e && e.message) ? e.message : String(e) });
-                console.error('prisma.message.create failed for row', row, e);
-              }
-            }
-            if (process.env.NODE_ENV !== 'production') {
-              return NextResponse.json({ ok: true, inserted: success, perRowErrors, mappedCount: mapped.length });
-            }
-            return NextResponse.json({ ok: true, inserted: success });
-          }
-
-          return NextResponse.json({ ok: true, inserted });
-        } catch (err) {
-          console.error('prisma.message.createMany failed', err && (err as any).stack ? (err as any).stack : err);
-          // fallback to individual inserts
-          let success = 0;
-          for (const row of mapped) {
-            try { await prisma.message.create({ data: row }); success++; } catch (e) { console.error('prisma.message.create failed for row', row, e); }
-          }
-          return NextResponse.json({ ok: true, inserted: success });
-        }
-      } catch (err) {
-        console.error('POST /api/thread sync handler error', err);
-        return NextResponse.json({ error: 'sync failed' }, { status: 500 });
-      }
+        return NextResponse.json({ ok: true, inserted: result.count });
+      
     }
 
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });

@@ -49,7 +49,7 @@ model Message {
 
   parentId String? @db.LongText
 
-  thread   Thread @relation(fields: [idThread], references: [id])
+  thread   Thread @relation(fields: [idThread], references: [idThread])
   idThread String
 }
 

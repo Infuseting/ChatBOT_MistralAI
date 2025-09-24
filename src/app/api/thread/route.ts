@@ -90,8 +90,30 @@ export async function GET(_req: NextRequest) {
       console.error('GET /api/thread idThread handler error', e);
       // fallthrough to listing all threads
     }
-
-    const rows = await prisma.thread.findMany({ include: { messages: true }, orderBy: { createdAt: 'asc' } });
+    const access_token = _req.headers.get('authorization')?.split(' ')[1] || _req.cookies.get('access_token')?.value;
+    let rows : any[];
+    if (access_token) {
+      try {
+      const dbToken = await prisma.accessToken.findUnique({
+        where: { token: access_token },
+        include: { user: true },
+      });
+      if (dbToken?.user) {
+        const threads = await prisma.thread.findMany({
+          where: { userId: dbToken.user.id },
+          orderBy: { createdAt: 'asc' },
+        });
+        rows = threads;
+      } else {
+        rows = [];
+      }
+      } catch (err) {
+      console.error('GET /api/thread token lookup failed', err);
+      rows = [];
+      }
+    } else {
+      rows = await prisma.thread.findMany({ include: { messages: true }, orderBy: { createdAt: 'asc' } });
+    }
     return NextResponse.json(rows);
   } catch (err) {
     console.error('GET /api/thread error', err);
@@ -104,8 +126,6 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     console.log('POST /api/thread body:', JSON.stringify(body));
     const action = body?.action ?? 'create';
-
-    // helper: resolve user from Authorization header or cookie (access_token)
     async function resolveUserFromRequest(req: NextRequest) {
       try {
         const authHeader = req.headers.get('authorization') ?? '';

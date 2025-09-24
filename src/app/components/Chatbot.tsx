@@ -164,6 +164,7 @@ export default function Chatbot() {
                 setActualThread(current ? { ...current, messages: [...(current.messages ?? [])] } : null);
                 setIsShareThread(actualThread?.share ?? false);
             }
+
         }
 
     

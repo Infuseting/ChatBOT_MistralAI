@@ -8,6 +8,7 @@ import { toast, Bounce } from 'react-toastify';
 
 export default function ChatMessages({ thread, onRightBranchChange }: { thread: Thread, onRightBranchChange?: (v: boolean) => void }) {
     const [messages, setMessages] = useState<Message[]>(thread.messages ?? []);
+    const rootRef = useRef<HTMLDivElement | null>(null);
     useEffect(() => {
         setMessages(thread.messages ?? []);
     }, [thread.messages]);
@@ -78,9 +79,11 @@ export default function ChatMessages({ thread, onRightBranchChange }: { thread: 
             };
         } catch (e) {
         }
-        window.addEventListener('updateActualThread', async () => { await updateThreadMessages(); });
+
+        const updateHandler = async () => { await updateThreadMessages(); };
+        window.addEventListener('updateActualThread', updateHandler);
         return () => {
-            window.removeEventListener('updateActualThread', async () => { await updateThreadMessages(); });
+            window.removeEventListener('updateActualThread', updateHandler);
             try { delete (window as any).handleCopyCode; } catch (e) {}
         };
     }, []);
@@ -147,6 +150,54 @@ export default function ChatMessages({ thread, onRightBranchChange }: { thread: 
         }
     }, [childrenMap, messages.length]);
 
+    // When selection or branch changes scroll the conversation to show the most recent branch
+    useEffect(() => {
+        // run after render
+        let raf = 0;
+        raf = requestAnimationFrame(() => {
+            try {
+                const root = rootRef.current;
+                const lastId = branch[branch.length - 1]?.id;
+                const EXTRA_PADDING = 160; // px (≈10rem at 16px root font-size)
+                if (root && lastId) {
+                    const el = root.querySelector(`[data-msg-id="${lastId}"]`) as HTMLElement | null;
+                    if (el) {
+                        // try native scrollIntoView first
+                        if (typeof el.scrollIntoView === 'function') {
+                            el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                        }
+
+                        // additionally ensure the nearest scrollable ancestor shows the element with extra padding
+                        let scroller: HTMLElement | null = root;
+                        while (scroller && scroller.scrollHeight <= scroller.clientHeight) scroller = scroller.parentElement as HTMLElement | null;
+
+                        if (scroller) {
+                            const elRect = el.getBoundingClientRect();
+                            const scrollerRect = scroller.getBoundingClientRect();
+                            const delta = elRect.bottom - scrollerRect.bottom;
+                            // If element bottom is below scroller bottom, scroll by that amount plus padding.
+                            const scrollBy = Math.max(0, delta) + EXTRA_PADDING;
+                            if (scrollBy > 0) {
+                                scroller.scrollBy({ top: scrollBy, behavior: 'smooth' });
+                            }
+                        }
+                        return;
+                    }
+                }
+
+                // fallback: scroll nearest scrollable ancestor to bottom
+                let scroller = root?.parentElement ?? null;
+                while (scroller && scroller.scrollHeight <= scroller.clientHeight) scroller = scroller.parentElement;
+                if (scroller) {
+                    scroller.scrollTo({ top: scroller.scrollHeight + EXTRA_PADDING, behavior: 'smooth' });
+                }
+            } catch (e) {
+                // ignore
+            }
+        });
+        return () => { if (raf) cancelAnimationFrame(raf); };
+    }, [selection, branch.length]);
+
     function navigate(parentId: string, newIndex: number) {
         const newSel = { ...selection, [parentId]: newIndex };
         // recompute branch and keep only selections that are on the new path
@@ -168,7 +219,7 @@ export default function ChatMessages({ thread, onRightBranchChange }: { thread: 
     
 
     return (
-        <div className="flex flex-col space-y-4 p-4 lg:max-w-220 md:max-w-160 max-w-80 mx-auto">
+        <div ref={rootRef} className="flex flex-col space-y-4 p-4 lg:max-w-220 md:max-w-160 max-w-80 mx-auto">
             {/* root navigator if multiple root children */}
             <div className="flex items-center justify-between">
                 {(() => {
@@ -187,22 +238,24 @@ export default function ChatMessages({ thread, onRightBranchChange }: { thread: 
 
             {/* render branch messages */}
             {branch.map((m, i) => (
-                <div key={m.id} className={`${i === 0 ? 'mt-[15%]' : i === branch.length - 1 ? '2xl:mb-[10%] xl:mb-[10%] lg:mb-[10%] md:mb-[10%] sm:mb-[35%] mb-[40%]' : ''} ${m.sender === 'assistant' ? "max-w-[100%]" : "max-w-[80%]"} p-3 rounded-md ${m.sender === 'user' ? 'self-end bg-indigo-600 text-white' : 'self-star text-white'}`}>
-                    <div className="text-lg">{parseMarkdown(m.text)}</div>
-                    {/* if this message has multiple children, show navigator */}
-                    {(() => {
-                        const children = childrenMap.get(m.id) ?? [];
-                        if (children.length <= 1) return null;
-                        const idx = selection[m.id] ?? 0;
-                        return (
-                            <div className="mt-2 flex items-center justify-center text-sm text-gray-400 space-x-2">
-                                <button onClick={() => navigate(m.id, Math.max(0, idx - 1))} className="px-2">◀</button>
-                                <div>{idx + 1} / {children.length}</div>
-                                <button onClick={() => navigate(m.id, Math.min(children.length - 1, idx + 1))} className="px-2">▶</button>
-                            </div>
-                        );
-                    })()}
-                </div>
+                <>
+                    <div ref={i === branch.length - 1 ? undefined : undefined} data-msg-id={m.id} key={m.id} className={`${i === 0 ? 'mt-[15%]' : i === branch.length - 1 ? '2xl:mb-[10%] xl:mb-[10%] lg:mb-[10%] md:mb-[10%] sm:mb-[35%] mb-[40%]' : ''} ${m.sender === 'assistant' ? "max-w-[100%]" : "max-w-[80%]"} p-3 rounded-md ${m.sender === 'user' ? 'self-end bg-indigo-600 text-white' : 'self-star text-white'}`}>
+                        <div className="text-lg">{parseMarkdown(m.text)}</div>
+                        {/* if this message has multiple children, show navigator */}
+                        {(() => {
+                            const children = childrenMap.get(m.id) ?? [];
+                            if (children.length <= 1) return null;
+                            const idx = selection[m.id] ?? 0;
+                            return (
+                                <div className="mt-2 flex items-center justify-center text-sm text-gray-400 space-x-2">
+                                    <button onClick={() => navigate(m.id, Math.max(0, idx - 1))} className="px-2">◀</button>
+                                    <div>{idx + 1} / {children.length}</div>
+                                    <button onClick={() => navigate(m.id, Math.min(children.length - 1, idx + 1))} className="px-2">▶</button>
+                                </div>
+                            );
+                        })()}
+                    </div>
+                </>
             ))}
             <span aria-hidden="true" style={{ display: 'none' }}>{String(refreshToggle)}</span>
         </div>

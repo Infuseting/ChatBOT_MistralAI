@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Navbar from '../../components/Navbar';
 import Chatbot from '../../components/Chatbot';
-import { readThreadCache, setActualThread, threadExists } from '../../utils/Thread';
+import { readThreadCache, setActualThread, threadExists, openSharedThread } from '../../utils/Thread';
 import { ToastContainer } from 'react-toastify';
 
 export default function SharePage() {
@@ -17,26 +17,27 @@ export default function SharePage() {
       router.replace('/');
       return;
     }
-    try {
-      const exists = threadExists(code);
-      if (!exists) {
+
+    (async () => {
+      try {
+        const found = readThreadCache(code) ?? null;
+        if (found) {
+          setActualThread(found);
+        } else {
+          // openSharedThread performs an API fetch and is async
+          await openSharedThread(code);
+        }
+      } catch (err) {
+        console.error('Failed to open shared thread', err);
         router.replace('/');
         return;
+      } finally {
+        setLoaded(true);
       }
-      const found = readThreadCache().find(t => t.id === code) ?? null;
-      if (!found) {
-        router.replace('/');
-        return;
-      }
-      setActualThread(found);
-    } catch (e) {
-      router.replace('/');
-      return;
-    }
-    setLoaded(true);
+    })();
   }, [params?.code]);
 
-  if (!loaded) return <div className="p-4">Opening shared thread...</div>;
+  if (!loaded) return;
 
   return (
     <main className="w-full h-screen flex flex-row">

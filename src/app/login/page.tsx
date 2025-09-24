@@ -17,10 +17,7 @@ export default function LoginPage() {
     const router = useRouter();
 
     useEffect(() => {
-        const stored = typeof window !== "undefined" ? localStorage.getItem("google_credential") : null;
-        if (stored) {
-            router.replace(redirect_url || "/");
-        }
+        
     }, [router, redirect_url]);
     
 

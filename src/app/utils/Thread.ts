@@ -48,9 +48,9 @@ export function readOpenThreadMarker(): { id: string; path: string } | null {
         return null;
     }
 }
-export function selectThreadById(id:string) {
+export async function selectThreadById(id:string) {
     // prefer reading from persisted storage for sync selection
-    const t = readThreadCache().find(th => th.id === id) ?? null;
+    const t = (await getThreads()).find(th => th.id === id) ?? null;
     if (t) setActualThread(t as Thread);
 }
 
@@ -91,9 +91,9 @@ export function setThreadCache(list: Thread[]) {
         } catch (e) {}
     } catch (e) {}
 }
-export function findThreadById(id: string) : Thread | null {
+export async function findThreadById(id: string) : Promise<Thread | null> {
     try {
-        const threads = readThreadCache();
+        const threads = await getThreads();
         return (threads.find(th => th.id === id) ?? null) as Thread | null;
     } catch (e) {
         return null;
@@ -101,8 +101,8 @@ export function findThreadById(id: string) : Thread | null {
 }
 
 // Open a thread if found, otherwise create a new local thread and assign the provided id
-export function openOrCreateThreadWithId(id: string) : Thread {
-    const existing = findThreadById(id);
+export async function openOrCreateThreadWithId(id: string) : Promise<Thread> {
+    const existing = await findThreadById(id);
     if (existing) {
         setActualThread(existing);
         return existing;
@@ -128,28 +128,79 @@ export function openOrCreateThreadWithId(id: string) : Thread {
 }
 
 // For share links we just try to open if exists; otherwise create a placeholder and mark as remote
-export function openSharedThread(id: string) : Thread {
-    const existing = findThreadById(id);
+export async function openSharedThread(id: string) : Promise<Thread> {
+    const existing = await findThreadById(id);
     if (existing) {
         setActualThread(existing);
         return existing;
     }
+
+    // Try fetching the shared thread via API using shareCode
+    try {
+        const res = await fetch(`/api/thread?shareCode=${encodeURIComponent(id)}`);
+        if (res && res.ok) {
+            const payload = await res.json().catch(() => null);
+            if (payload) {
+                const msgs = (payload.messages ?? []) as any[];
+                const mappedMsgs = msgs.map(m => {
+                    // normalize timestamp to a Date always
+                    let ts: Date;
+                    try {
+                        const candidate = m.sentAt ?? m.timestamp ?? m.date ?? null;
+                        const d = ensureDate(candidate);
+                        ts = d instanceof Date ? d : (isNaN(Number(candidate)) ? utcNow() : new Date(Number(candidate)));
+                    } catch (e) {
+                        try {
+                            const candidate = m.sentAt ?? m.timestamp ?? m.date ?? null;
+                            const parsed = Date.parse(String(candidate));
+                            ts = isNaN(parsed) ? utcNow() : new Date(parsed);
+                        } catch {
+                            ts = utcNow();
+                        }
+                    }
+                    return {
+                        id: m.idMessage ?? m.id ?? '',
+                        text: m.text ?? m.content ?? '',
+                        thinking: m.thinking ?? '',
+                        sender: m.sender ?? m.role ?? 'user',
+                        timestamp: ts,
+                        parentId: m.parentId ?? null,
+                    };
+                });
+
+                const thread: Thread = {
+                    id: payload.idThread ?? payload.id ?? String(payload.id ?? id),
+                    name: payload.name ?? `Shared ${id}`,
+                    date: payload.createdAt ? (ensureDate(payload.createdAt) as Date) : utcNow(),
+                    messages: mappedMsgs,
+                    status: 'remote',
+                    context: payload.context ?? '',
+                    model: payload.model ?? getActualModel() ?? 'mistral-medium-latest',
+                    share: true,
+                };
+                // persist
+                try { const all = readThreadCache(); all.push(thread); setThreadCache(all); } catch (e) {}
+                setActualThread(thread);
+                return thread;
+            }
+        }
+    } catch (e) {
+        console.error('openSharedThread fetch failed', e);
+    }
+
+    // Fallback: create a placeholder remote thread locally
     const thread: Thread = {
         id,
         name: `Shared ${id}`,
-    date: utcNow(),
+        date: utcNow(),
         messages: [],
         status: 'remote',
         context: '',
         model: getActualModel() ?? 'mistral-medium-latest',
-        share: true
+        share: true,
     };
+    try { const all = readThreadCache(); all.push(thread); setThreadCache(all); } catch (e) {}
     setActualThread(thread);
-    try {
-        const all = readThreadCache();
-        all.push(thread);
-        setThreadCache(all);
-    } catch (e) {}
     return thread;
 }
 export function newThread() {
@@ -163,6 +214,10 @@ export function newThread() {
         model: getActualModel() ?? 'mistral-medium-latest',
         share: false
     };
+    const url = `/`;
+    if (typeof window !== 'undefined' && window.history && window.history.pushState) {
+        window.history.pushState({}, '', url);
+    } 
     setActualThread(thread);
     try {
         const all = readThreadCache();
@@ -242,7 +297,7 @@ export async function reloadThread() {
                     status: 'remote',
                     context: r.context ?? '',
                     model: r.model ?? getActualModel() ?? 'mistral-medium-latest',
-                    share: true
+                    share: false
                 } as Thread;
             });
             try { setThreadCache(threads); } catch (e) {}
@@ -290,9 +345,27 @@ export async function getThreads(): Promise<Thread[]> {
     return allThreads;
 }
 
-export function getShareLink(thread: Thread) {
-    return `${window.location.origin}/s/${thread.id}`;
+export async function getShareLink(thread: Thread) : Promise<string | null | void> {
+    const result = await fetch('/api/thread', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'share', idThread: thread.id }) })
+        .catch((e) => {
+            console.error('Failed to notify server about sharing thread', e);
+            return null;
+        });
+    if (!result || !result.ok) {
+        console.error('Failed to notify server about sharing thread, non-ok response', result && (result as Response).status);
+        return null;
+    }
+
+    const payload = await result.json().catch(() => null);
+    const code = payload?.share?.code ?? payload?.code ?? null;
+    if (!code) {
+        console.error('Share API response did not contain a share code', payload);
+        return null;
+    }
+
+    return `${window.location.origin}/s/${code}`;
 }
+
 export function getActualThread() : Thread | null {
     const thread = (globalThis as any).actualThread ?? null;
     if (thread) {
@@ -412,6 +485,10 @@ export async function handleMessageSend(thread: Thread, content: string) {
         createServerThread(thread);
     }
     syncServerThread(thread);
+    const url = `/${thread.id}`;
+    if (typeof window !== 'undefined' && window.history && window.history.pushState) {
+        window.history.pushState({}, '', url);
+    } 
 }
 
 

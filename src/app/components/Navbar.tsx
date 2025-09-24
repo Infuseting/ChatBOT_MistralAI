@@ -25,6 +25,49 @@ export default function Navbar() {
     const navAnimate = navbarOpen ? { x: 0, opacity: 1 } : { x: -280, opacity: 0 };
     const [threads, setThreads] = useState<any[]>([]);
     const [threadsLoaded, setThreadsLoaded] = useState(false);
+    const [debugLogs, setDebugLogs] = useState<string[]>([]);
+    function pushDebug(msg: string) {
+        setDebugLogs(prev => [msg, ...prev].slice(0, 20));
+    }
+    function handleNewThread() {
+        const actual = getActualThread();
+        if (actual?.share) {
+            window.location.href = `${window.location.origin}/`;
+            return;
+        }
+        const t = newThread();
+        setActualThread(t);
+        
+    }
+    
+    function handleThreadClick(t: any) {
+        try {
+            const actual = getActualThread();
+            const msg = `click thread actual=${actual?.id ?? 'null'} thread=${t?.id ?? 'unknown'}`;
+            try { console.log(msg, actual, t); } catch {}
+            pushDebug(msg);
+        } catch (e) {
+        }
+        try {
+            if (getActualThread()?.share) {
+                window.location.href = `${window.location.origin}/${t.id}`;
+            } else {
+                try {
+                    const url = `/${encodeURIComponent(String(t.id ?? ''))}`;
+                    if (typeof window !== 'undefined' && window.history && window.history.pushState) {
+                        window.history.pushState({}, '', url);
+                    } else {
+                        router.replace(url);
+                    }
+                } catch (e) {
+                    pushDebug('set url failed ' + String(e));
+                }
+                setActualThread(t as any);
+            }
+        } catch (e) {
+            pushDebug('handleThreadClick error ' + String(e));
+        }
+    }
     
     useEffect(() => {
         let cancelled = false;
@@ -124,7 +167,7 @@ export default function Navbar() {
             >
             
             <div className="flex justify-between items-center">
-                <motion.div onClick={() => newThread()} className="w-8 h-8 rounded-md hover:bg-gray-600 flex items-center justify-center cursor-pointer" whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
+                <motion.div onClick={() => handleNewThread()} className="w-8 h-8 rounded-md hover:bg-gray-600 flex items-center justify-center cursor-pointer" whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
                     <FaPlus className="text-2xl text-white" />
                 </motion.div>
                 <motion.div onClick={() => setNavbarOpen(!navbarOpen)} className="w-8 h-8 rounded-md hover:bg-gray-600 flex items-center justify-center cursor-pointer" whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
@@ -133,7 +176,7 @@ export default function Navbar() {
 
             </div>
             <div className="flex mt-8 flex-col space-y-2">
-                <motion.div onClick={() => newThread()} className="flex items-center text-xl p-2 rounded-md space-x-2 hover:bg-gray-600"  whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                <motion.div onClick={() => handleNewThread()} className="flex items-center text-xl p-2 rounded-md space-x-2 hover:bg-gray-600"  whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                     <FaPencilAlt className=" text-white" />
                     <span className="">New Chat</span>
                 </motion.div>
@@ -200,7 +243,7 @@ export default function Navbar() {
                                                 className="w-full p-2 rounded-md hover:bg-gray-700 cursor-pointer"
                                                 whileHover={{ scale: 1.02 }}
                                                 whileTap={{ scale: 0.98 }}
-                                                onClick={() => setActualThread(t as any)}
+                                                onClick={() => handleThreadClick(t as any)}
                                             >
                                                 <div className="text-sm truncate">{t.name}</div>
                                                 
@@ -224,7 +267,7 @@ export default function Navbar() {
                                                     className={`w-full p-2 rounded-md hover:bg-gray-700 cursor-pointer ${getActualThread()?.id === t.id ? 'bg-gray-700' : ''}`}
                                                     whileHover={{ scale: 1.02 }}
                                                     whileTap={{ scale: 0.98 }}
-                                                    onClick={() => { setActualThread(t as any); }}
+                                                    onClick={() => handleThreadClick(t)}
                                                 >
                                                     <div className="text-sm truncate">{t.name}</div>
                                                 </motion.div>
@@ -272,6 +315,7 @@ export default function Navbar() {
             {showSettings && <UserSettingsModal onClose={() => setShowSettings(false)} />}
             {showSearch && <SearchModal onClose={() => setShowSearch(false)} />}
             
+
             </motion.nav>
         </>
     );

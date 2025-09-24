@@ -9,12 +9,28 @@ import { FaPlus, FaMicrophone, FaPaperPlane } from "react-icons/fa";
 import SystemContextModal from "./SystemContextModal";
 import { getActualModel, getAvailableModelList, getFastModelList, setActualModel } from '../utils/Models';
 import ChatMessages from "./ChatMessages";
-async function handleShare() {
-    try {
-        console.log("Sharing thread:", (globalThis as any).actualThread);
-        const link = getShareLink((globalThis as any).actualThread as Thread);
-        await navigator.clipboard.writeText(link);
-        toast.success('Share link copied to clipboard!', {
+
+
+export default function Chatbot() {
+    const [dropdownMenuOpen, setDropdownMenuOpen] = useState(false);
+    const [modelPanelOpen, setModelPanelOpen] = useState(false);
+    const [contextModalOpen, setContextModalOpen] = useState(false);
+    // toggle to force an invisible re-render when needed
+    const [refreshToggle, setRefreshToggle] = useState(false);
+    const [actualModel, setActualModelState] = useState<string | null>(null);
+    const [models, setModels] = useState<string[]>([]);
+    const [actualThread, setActualThread] = useState<Thread | null>(getActualThread());
+    const [isRightBranch, setIsRightBranch] = useState<boolean>(true);
+    const [isShareThread, setIsShareThread] = useState<boolean>(actualThread?.share ?? false);
+    
+    
+    const menuRef = useRef<HTMLDivElement | null>(null);
+    const firstItemRef = useRef<HTMLButtonElement | null>(null);
+    const messagesWrapperRef = useRef<HTMLDivElement | null>(null);
+    const inputBarRef = useRef<HTMLDivElement | null>(null);
+    async function handleShare() {
+    if (isShareThread) {
+        toast.error('You cannot share a shared thread.', {
             position: "bottom-right",
             autoClose: 5000,
             hideProgressBar: false,
@@ -25,6 +41,51 @@ async function handleShare() {
             theme: "dark",
             transition: Bounce,
         });
+        return;
+    }
+    try {
+        console.log("Sharing thread:", (globalThis as any).actualThread);
+        if ((globalThis as any).actualThread.status === 'remote') {
+            const shareLink : string | null = await getShareLink((globalThis as any).actualThread as Thread);
+            if (shareLink === null) {
+                toast.error('Failed to generate share link', {
+                    position: "bottom-right",
+                    autoClose: 5000,
+                    hideProgressBar: false,
+                    closeOnClick: false,
+                    pauseOnHover: true,
+                    draggable: true,
+                    progress: undefined,
+                    theme: "dark",
+                    transition: Bounce,
+                });
+                return;
+            }
+            await navigator.clipboard.writeText(shareLink);
+            toast.success('Share link copied to clipboard!', {
+                position: "bottom-right",
+                autoClose: 5000,
+                hideProgressBar: false,
+                closeOnClick: false,
+                pauseOnHover: true,
+                draggable: true,
+                progress: undefined,
+                theme: "dark",
+                transition: Bounce,
+            });
+        } else {
+            toast.error('You can only share threads that are saved remotely.', {
+                position: "bottom-right",
+                autoClose: 5000,
+                hideProgressBar: false,
+                closeOnClick: false,
+                pauseOnHover: true,
+                draggable: true,
+                progress: undefined,
+                theme: "dark",
+                transition: Bounce,
+            });
+        }
     } catch (err) {
         if (getActualThread() === null) {
             toast.error('Aucun thread ouvert', {
@@ -54,23 +115,6 @@ async function handleShare() {
         });
     }
 }
-
-export default function Chatbot() {
-    const [dropdownMenuOpen, setDropdownMenuOpen] = useState(false);
-    const [modelPanelOpen, setModelPanelOpen] = useState(false);
-    const [contextModalOpen, setContextModalOpen] = useState(false);
-    // toggle to force an invisible re-render when needed
-    const [refreshToggle, setRefreshToggle] = useState(false);
-    const [actualModel, setActualModelState] = useState<string | null>(null);
-    const [models, setModels] = useState<string[]>([]);
-    const [actualThread, setActualThread] = useState<Thread | null>(getActualThread());
-    const [isRightBranch, setIsRightBranch] = useState<boolean>(true);
-    
-    
-    const menuRef = useRef<HTMLDivElement | null>(null);
-    const firstItemRef = useRef<HTMLButtonElement | null>(null);
-    const messagesWrapperRef = useRef<HTMLDivElement | null>(null);
-    const inputBarRef = useRef<HTMLDivElement | null>(null);
     function handleDropdown(thread : Thread | null) {
             // Toggle an invisible state to force a re-render when needed.
             // This state does not affect visible UI directly.
@@ -111,8 +155,12 @@ export default function Chatbot() {
             try {
                 const t = (e as CustomEvent).detail as Thread | null;
                 setActualThread(t ?? getActualThread());
+                console.log('Actual thread updated', t);
+                setIsShareThread(t?.share ?? false);
             } catch (err) {
                 setActualThread(getActualThread());
+                console.log('Actual thread updated', getActualThread());
+                setIsShareThread(actualThread?.share ?? false);
             }
         }
     
@@ -134,6 +182,7 @@ export default function Chatbot() {
     
 
     function handleSelectModel(model: string) {
+        
          toast.success(`Model "${model}" selected`, {
             position: "bottom-right",
             autoClose: 5000,
@@ -176,6 +225,20 @@ export default function Chatbot() {
     }, []);
 
     useEffect(() => {
+        if (dropdownMenuOpen && getActualThread()?.share) {
+            toast.error('You cannot modify parameter of shared thread.', {
+                position: "bottom-right",
+                autoClose: 5000,
+                hideProgressBar: false,
+                closeOnClick: false,
+                pauseOnHover: true,
+                draggable: true,
+                progress: undefined,
+                theme: "dark",
+                transition: Bounce,
+            })
+            setDropdownMenuOpen(false);
+        }
         if (dropdownMenuOpen) {
             firstItemRef.current?.focus();
         }
@@ -307,7 +370,7 @@ export default function Chatbot() {
                                 <textarea
                                     id="chat-input"
                                     className="w-full bg-gray-800 max-h-80 text-white px-2 conversations-scroll rounded-md resize-none overflow-y-auto focus:outline-none placeholder-gray-400"
-                                    placeholder={`${!isRightBranch ? "You need to be on the right branch to type your request..." : "Type your request..."}`}
+                                    placeholder={`${!isRightBranch ? "You need to be on the right branch to type your request..." : isShareThread ? "You are in a shared thread. You can't type here." : "Type your request..."}`}
                                     onInput={(e) => {
                                         
                                         const el = e.currentTarget as HTMLTextAreaElement;
@@ -339,7 +402,7 @@ export default function Chatbot() {
                                             el.style.height = `${el.scrollHeight}px`;
                                         }
                                     }}
-                                    disabled={!isRightBranch}
+                                    disabled={!isRightBranch || isShareThread}
                                     
                                     rows={1}
                                     style={{ paddingTop: 0, paddingBottom: 0 }}
@@ -365,7 +428,7 @@ export default function Chatbot() {
                                     type="button"
                                     className="flex items-center justify-center px-3 h-10  hover:bg-indigo-500 text-white rounded-md"
                                     title="Send message"
-                                    disabled={!isRightBranch}
+                                    disabled={!isRightBranch || isShareThread}
                                     aria-label="Send message"
                                     onClick={() => {
                                         if (!isRightBranch) return;
@@ -423,7 +486,7 @@ export default function Chatbot() {
                                 <textarea
                                     id="chat-input"
                                     className="w-full bg-gray-800 max-h-80 text-white px-2 conversations-scroll rounded-md resize-none overflow-y-auto focus:outline-none placeholder-gray-400"
-                                    placeholder="Type your request..."
+                                    placeholder={`${!isRightBranch ? "You need to be on the right branch to type your request..." : isShareThread ? "You are in a shared thread. You can't type here." : "Type your request..."}`}
                                     onInput={(e) => {
                                         const el = e.currentTarget as HTMLTextAreaElement;
                                         el.style.height = "auto";
@@ -455,7 +518,7 @@ export default function Chatbot() {
                                             el.style.height = `${el.scrollHeight}px`;
                                         }
                                     }}
-                                    disabled={!isRightBranch}
+                                    disabled={!isRightBranch || isShareThread}
                                     rows={1}
                                     style={{ paddingTop: 0, paddingBottom: 0 }}
                                 />
@@ -480,7 +543,7 @@ export default function Chatbot() {
                                     className="flex items-center justify-center px-3 h-10  hover:bg-indigo-500 text-white rounded-md"
                                     title="Send message"
                                     aria-label="Send message"
-                                    disabled={!isRightBranch}
+                                    disabled={!isRightBranch || isShareThread}
                                     onClick={() => {
                                         const value = (document.getElementById("chat-input") as HTMLTextAreaElement)?.value || "";
                                         if (value.trim().length === 0) {

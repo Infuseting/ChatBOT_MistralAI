@@ -65,8 +65,8 @@ model AccessToken {
 model Share {
   id        String    @id @default(uuid())
   code      String    @unique
-  thread    Thread?   @relation(fields: [threadId], references: [id])
-  threadId  String?
+  thread    Thread?   @relation(fields: [idThread], references: [id])
+  idThread  String?
   user      User?     @relation(fields: [userId], references: [id])
   userId    String?
   createdAt DateTime  @default(now())

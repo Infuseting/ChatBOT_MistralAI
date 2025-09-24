@@ -3,7 +3,7 @@
 import { motion } from "motion/react";
 import { FaTimes } from 'react-icons/fa';
 import { useState, useEffect } from 'react';
-import { getThreads, selectThreadById } from "../utils/Thread";
+import { getActualThread, getThreads, selectThreadById, setActualThread } from "../utils/Thread";
 import { ensureDate } from '../utils/DateUTC';
 const MotionFaTimes = motion(FaTimes);
 
@@ -48,7 +48,30 @@ export default function SearchModal({ onClose }: { onClose: () => void }) {
     const lastWeek: typeof sortedThreads = [];
     const lastMonth: typeof sortedThreads = [];
     const older = new Map<string, typeof sortedThreads[number][]>();
-
+    function handleThreadClick(t: any) {
+            try {
+                const actual = getActualThread();
+                const msg = `click thread actual=${actual?.id ?? 'null'} thread=${t?.id ?? 'unknown'}`;
+                try { console.log(msg, actual, t); } catch {}
+        
+            } catch (e) {
+            }
+            try {
+                if (getActualThread()?.share) {
+                    window.location.href = `${window.location.origin}/${t.id}`;
+                } else {
+                    try {
+                        const url = `/${encodeURIComponent(String(t.id ?? ''))}`;
+                        if (typeof window !== 'undefined' && window.history && window.history.pushState) {
+                            window.history.pushState({}, '', url);
+                        }
+                    } catch (e) {
+                    }
+                    setActualThread(t as any);
+                }
+            } catch (e) {
+            }
+        }
     const getSafeDate = (t: typeof sortedThreads[number]) => {
         if (!t.date) return new Date(0);
         const d = t.date instanceof Date ? t.date : ensureDate(t.date as any);
@@ -84,7 +107,7 @@ export default function SearchModal({ onClose }: { onClose: () => void }) {
                         className="w-full p-2 rounded-md hover:bg-gray-700 cursor-pointer"
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
-                        onClick={() => { selectThreadById(t.id); onClose(); }}
+                        onClick={() => { handleThreadClick(t); onClose(); }}
                     >
                         <div className="text-sm truncate">{t.name}</div>
                         <div className="text-xs text-gray-400">{getSafeDate(t).toLocaleString()}</div>
@@ -127,7 +150,7 @@ export default function SearchModal({ onClose }: { onClose: () => void }) {
                                             className="w-full p-2 rounded-md hover:bg-gray-700 cursor-pointer"
                                             whileHover={{ scale: 1.02 }}
                                             whileTap={{ scale: 0.98 }}
-                                            onClick={() => { selectThreadById(t.id); onClose(); }}
+                                            onClick={() => { handleThreadClick(t); onClose(); }}
                                         >
                                             <div className="text-sm truncate">{t.name}</div>
                                             <div className="text-xs text-gray-400">{getSafeDate(t).toLocaleString()}</div>

@@ -101,6 +101,7 @@ export async function GET(_req: NextRequest) {
       if (dbToken?.user) {
         const threads = await prisma.thread.findMany({
           where: { userId: dbToken.user.id },
+          include: { messages: true },
           orderBy: { createdAt: 'asc' },
         });
         rows = threads;
@@ -230,6 +231,30 @@ export async function POST(req: NextRequest) {
 
         return NextResponse.json({ ok: true, inserted: result.count });
       
+    }
+
+    if (action === 'update') {
+      const idThread = body?.idThread;
+      if (!idThread || typeof idThread !== 'string') return NextResponse.json({ error: 'idThread is required' }, { status: 400 });
+      const data = body?.data ?? {};
+      try {
+        const user = await resolveUserFromRequest(req);
+        if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+        const thread = await prisma.thread.findUnique({ where: { idThread: idThread } });
+        if (!thread) return NextResponse.json({ error: 'Thread not found' }, { status: 404 });
+        if (thread.userId !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+        const allowed: any = {};
+        if (typeof data.name === 'string') allowed.name = data.name;
+        if (typeof data.context === 'string') allowed.context = data.context;
+        if (typeof data.model === 'string') allowed.model = data.model;
+
+        const updated = await prisma.thread.update({ where: { id: thread.id }, data: allowed, include: { messages: true } });
+        return NextResponse.json({ ok: true, thread: updated });
+      } catch (err) {
+        console.error('POST /api/thread update failed', err);
+        return NextResponse.json({ error: 'Failed to update thread' }, { status: 500 });
+      }
     }
 
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });

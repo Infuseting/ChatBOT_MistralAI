@@ -173,7 +173,7 @@ export async function openSharedThread(id: string) : Promise<Thread> {
                     id: payload.idThread ?? payload.id ?? String(payload.id ?? id),
                     name: payload.name ?? `Shared ${id}`,
                     date: payload.createdAt ? (ensureDate(payload.createdAt) as Date) : utcNow(),
-                    messages: mappedMsgs,
+                    messages: mappedMsgs as any,
                     status: 'remote',
                     context: payload.context ?? '',
                     model: payload.model ?? getActualModel() ?? 'mistral-medium-latest',
@@ -229,6 +229,14 @@ export function newThread() {
 }
 
 export function setActualThread(thread: Thread | null) {
+    if ((globalThis as any).actualThread) {
+        const prev : Thread = (globalThis as any).actualThread;
+        if (prev.status === 'remote') {
+            const prevId = prev.id;
+            const allThreadsIndex = allThreads.findIndex(t => t.id === prevId);
+            allThreads[allThreadsIndex] = prev;
+        }
+    }
     try {
         (globalThis as any).actualThread = thread;
         try {
@@ -294,7 +302,7 @@ export async function reloadThread() {
                     id: r.idThread ?? r.id ?? String(r.id),
                     name: r.name ?? defaultThreadName,
                     date: parseTimestamp(r.createdAt),
-                    messages: mappedMsgs,
+                    messages: mappedMsgs as any,
                     status: 'remote',
                     context: r.context ?? '',
                     model: r.model ?? getActualModel() ?? 'mistral-medium-latest',
@@ -387,30 +395,59 @@ export function getLastMessage(thread: Thread) : Message | null | undefined {
     console.log(msgs);
     if (msgs.length === 0) return null;
     try {
-        if (msgs.length === 0) return null;
+        // Robust timestamp extractor: supports Date, number (ms), ISO/string, or nested fields.
         const getTime = (m: any): number => {
-            if (!m) return 0;
-            const ts = m.timestamp ?? m.date ?? m.time ?? null;
-            if (!ts) return 0;
-            if (ts instanceof Date) return ts.getTime();
-            const parsed = Date.parse(ts);
-            return isNaN(parsed) ? 0 : parsed;
+            if (!m) return -1;
+            const candidates = [m.timestamp, m.date, m.time, m.sentAt, m.createdAt, m.ts];
+            for (const c of candidates) {
+                if (c == null) continue;
+                if (c instanceof Date) return c.getTime();
+                if (typeof c === 'number' && !isNaN(c)) return c;
+                try {
+                    const parsed = Date.parse(String(c));
+                    if (!isNaN(parsed)) return parsed;
+                } catch {}
+            }
+            // try parsing direct string fields like m.timeStamp or m.raw
+            try {
+                const parsed = Date.parse(JSON.stringify(m));
+                if (!isNaN(parsed)) return parsed;
+            } catch {}
+            return -1;
         };
-        let best = msgs[msgs.length - 1];
-        let bestTime = getTime(best);
-        for (const m of msgs) {
+
+        // Find the message with the largest timestamp. If none have timestamps, fall back to last element.
+        let bestIndex = -1;
+        let bestTime = -1;
+        for (let i = 0; i < msgs.length; i++) {
+            const m = msgs[i];
             const t = getTime(m);
-            if (t > bestTime) {
-                best = m;
+            if (t > bestTime || (t === bestTime && i > bestIndex) && m.sender !== 'user') {
+                console.log('New best time', t, 'at index', i, 'New one:', m, "Old one:", msgs[bestIndex]);
                 bestTime = t;
+                bestIndex = i;
             }
         }
-        return best as Message;
+
+        if (bestIndex === -1) {
+            // no parsable timestamps, return last message
+            return msgs[msgs.length - 1] as Message;
+        }
+
+        return msgs[bestIndex] as Message;
     } catch (e) {
         return null;
     }
 
 }
+
+export function updateAllThreadsList(updated: Thread) {
+    const index = allThreads.findIndex(t => t.id === updated.id);
+    if (index !== -1) allThreads[index] = updated;
+    setActualThread(updated);
+    updateActualThread();    
+}
+
 
 export async function handleMessageSend(thread: Thread, content: string) {
     const lastMessage = getLastMessage(thread);
@@ -434,7 +471,6 @@ export async function handleMessageSend(thread: Thread, content: string) {
         status: 'local'
     }
     thread.messages = [...(thread.messages ?? []), userMessage, newMessage];
-    updateActualThread();
         
     const client = new Mistral({apiKey: getApiKey()});
 
@@ -457,7 +493,6 @@ export async function handleMessageSend(thread: Thread, content: string) {
     if (!chatResponse || !chatResponse.choices || chatResponse.choices.length === 0) {
         newMessage.text = "Error: no response";
         newMessage.thinking = "";
-        updateActualThread();
         return;
     }
     const choice = chatResponse.choices[0];
@@ -484,11 +519,11 @@ export async function handleMessageSend(thread: Thread, content: string) {
     newMessage.text = finalText;
     newMessage.thinking = reasoning;
     updateActualThread();
-    if (thread.status !== 'remote') {
+    if ((thread.status as any) !== 'remote') {
         await createServerThread(thread);
     }
     await syncServerThread(thread);
-    updateActualThread();
+    updateAllThreadsList(thread);
     const url = `/${thread.id}`;
     if (typeof window !== 'undefined' && window.history && window.history.pushState) {
         window.history.pushState({}, '', url);
@@ -528,7 +563,6 @@ async function createServerThread(thread: Thread) {
             }
 
             thread.status = 'remote';
-            updateActualThread();
             updateThreadList();
             allThreads.push(thread);
         } catch (err) {
@@ -596,7 +630,6 @@ async function syncServerThread(thread: Thread) {
                 return;
             }
             const json = await res.json().catch(() => ({}));
-            updateActualThread();
         } catch (err) {
             console.error('syncServerThread API error', err);
             if (typeof window !== 'undefined') try { toast.error('Erreur lors de la synchronisation (API).', { position: "bottom-right", autoClose: 5000, hideProgressBar: false, closeOnClick: false, pauseOnHover: true, draggable: true, progress: undefined, theme: "dark", transition: Bounce }); } catch (e) {}
@@ -620,6 +653,42 @@ async function syncServerThread(thread: Thread) {
             } catch (err) {}
         }
         return;
+    }
+}
+
+export async function updateServerThread(thread: Thread) {
+    try {
+        if (!thread) return;
+
+        // Ensure thread exists remotely first
+        if ((thread.status as any) !== 'remote') {
+            return;
+        }
+
+        const payload: any = {};
+        if (typeof thread.name === 'string') payload.name = thread.name;
+        if (typeof thread.context === 'string') payload.context = thread.context;
+        if (typeof thread.model === 'string') payload.model = thread.model;
+
+        const res = await fetch('/api/thread', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'update', idThread: thread.id, data: payload })
+        });
+        if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            console.error('updateServerThread API non-ok response', res.status, text);
+            return;
+        }
+        const json = await res.json().catch(() => null);
+        if (json && json.thread) {
+            thread.name = json.thread.name ?? thread.name;
+            thread.context = json.thread.context ?? thread.context;
+            thread.model = json.thread.model ?? thread.model;
+        }
+        updateActualThread();
+    } catch (err) {
+        console.error('updateServerThread error', err);
     }
 }
 

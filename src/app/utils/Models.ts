@@ -32,7 +32,10 @@ export function getFastModelList(): string[] {
         if (typeof window === 'undefined' || !window.localStorage) {
             return ['mistral-large-latest', 'mistral-medium-2505'];
         }
-        return window.localStorage.getItem('fastModelList')?.split(',') ?? ['mistral-large-latest', 'mistral-medium-2505'];
+        const stored = window.localStorage.getItem('fastModelList');
+        if (!stored) return ['mistral-large-latest', 'mistral-medium-2505'];
+        const list = stored.split(',').map(s => s.trim()).filter(s => s.length > 0);
+        return list.length ? list : ['mistral-large-latest', 'mistral-medium-2505'];
     } catch (e) {
         return ['mistral-large-latest', 'mistral-medium-2505'];
     }

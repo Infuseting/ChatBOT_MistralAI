@@ -141,11 +141,9 @@ export default function Navbar() {
                     <TbLayoutSidebarLeftExpand className="text-2xl" />
                 </motion.button>
             </div>
-
-            {/* small-screen backdrop: visible only on screens smaller than `sm` */}
             {navbarOpen && (
                 <div
-                    className={`fixed inset-0 z-99 bg-black/40 backdrop-blur-lg lg:hidden `}
+                    className={`fixed inset-0 z-99 bg-black/40 backdrop-blur-sm lg:hidden `}
                     onClick={() => setNavbarOpen(false)}
                 />
             )}

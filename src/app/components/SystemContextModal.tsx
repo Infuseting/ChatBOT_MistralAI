@@ -1,6 +1,6 @@
 "use client";
 
-import { getActualThread } from "../utils/Thread";
+import { getActualThread, updateServerThread } from "../utils/Thread";
 import { FaTimes } from "react-icons/fa";
 import { motion } from "motion/react";
 import { useEffect, useState } from 'react';
@@ -18,6 +18,7 @@ export default function SystemContextModal({ onClose }: { onClose: () => void })
     function saveAndClose() {
         const thread = getActualThread();
         if (thread) thread.context = text;
+        try { updateServerThread(thread as any); } catch (e) {}
         onClose();
     }
 

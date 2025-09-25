@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { ensureDate } from '@/app/utils/DateUTC';
-import { threadId } from 'worker_threads';
 
 function generateUUID(): string {
   // Prefer the platform crypto.randomUUID if available, otherwise fallback to a UUIDv4 polyfill.
   try {
     const rnd = (globalThis as any).crypto?.randomUUID;
     if (typeof rnd === 'function') return rnd();
-  } catch (_) {
-    // ignore and fallback
+  } catch (e) {
   }
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
     const r = (Math.random() * 16) | 0;

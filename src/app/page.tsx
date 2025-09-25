@@ -11,26 +11,30 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    try {
-      const marker = readOpenThreadMarker();
-      if (marker) {
-        const cached = readThreadCache(marker.id);
-        if (cached) {
-          setActualThread(cached);
-          router.replace(marker.path);
-          return;
+    const init = async () => {
+      try {
+        const marker = readOpenThreadMarker();
+        if (marker) {
+          const cached = readThreadCache(marker.id);
+          if (cached) {
+            setActualThread(cached);
+            router.replace(marker.path);
+            return;
+          }
+          const found = await findThreadById(marker.id);
+          if (found) {
+            setActualThread(found);
+            router.replace(marker.path);
+            return;
+          }
         }
-        const found = findThreadById(marker.id);
-        if (found) {
-          setActualThread(found);
-          router.replace(marker.path);
-          return;
-        }
-      }
 
-      newThread();
-    } catch (e) {
-    }
+        newThread();
+      } catch (e) {
+      }
+    };
+
+    init();
   }, []);
 
   return (

@@ -46,8 +46,8 @@ export default function Chatbot() {
     try {
         console.log(actualThread);
         if (actualThread?.status === 'remote') {
-            const shareLink : string | null = await getShareLink(actualThread as Thread);
-            if (shareLink === null) {
+            const shareLink : string | void | null = await getShareLink(actualThread as Thread);
+            if (shareLink === null || shareLink === undefined || shareLink.length === 0 || typeof shareLink !== 'string') {
                 toast.error('Failed to generate share link', {
                     position: "bottom-right",
                     autoClose: 5000,
@@ -61,7 +61,7 @@ export default function Chatbot() {
                 });
                 return;
             }
-            await navigator.clipboard.writeText(shareLink);
+            await navigator.clipboard.writeText(shareLink ?? '');
             toast.success('Share link copied to clipboard!', {
                 position: "bottom-right",
                 autoClose: 5000,

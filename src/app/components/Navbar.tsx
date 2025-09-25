@@ -12,6 +12,7 @@ import { motion } from "motion/react";
 import { getThreads, newThread, reloadThread } from '../utils/Thread';
 import { ensureDate } from '../utils/DateUTC';
 import { getActualThread } from '../utils/Thread';
+import ConversationsList from './ThreadsList';
 export default function Navbar() {
     const [menuOpen, setMenuOpen] = useState(false);
     const [navbarOpen, setNavbarOpen] = useState(true);
@@ -23,8 +24,7 @@ export default function Navbar() {
     const [showSettings, setShowSettings] = useState(false);
     const [showSearch, setShowSearch] = useState(false);
     const navAnimate = navbarOpen ? { x: 0, opacity: 1 } : { x: -280, opacity: 0 };
-    const [threads, setThreads] = useState<any[]>([]);
-    const [threadsLoaded, setThreadsLoaded] = useState(false);
+    // thread loading moved into ConversationsList
     const [refreshToggle, setRefreshToggle] = useState(false);
    
     function handleNewThread() {
@@ -104,38 +104,7 @@ export default function Navbar() {
         void loadUser();
         return () => { cancelled = true; };
     }, [router]);
-    useEffect(() => {
-        let cancelled = false;
-        async function loadThreads() {
-            try {
-                const t = await getThreads();
-                if (!cancelled) {
-                    setThreads(t ?? []);
-                    setThreadsLoaded(true);
-                }
-            } catch (err) {
-                console.error('Failed to load threads', err);
-                if (!cancelled) {
-                    setThreads([]);
-                    setThreadsLoaded(true);
-                }
-            }
-        }
-        void loadThreads();
-
-        async function onActualThreadUpdated() {
-            await reloadThread();
-            void loadThreads();
-        }
-
-        window.addEventListener('actualThreadUpdated', onActualThreadUpdated as EventListener);
-        window.addEventListener('updateThreadList', onActualThreadUpdated as EventListener);
-        return () => {
-            cancelled = true;
-            window.removeEventListener('actualThreadUpdated', onActualThreadUpdated as EventListener);
-            window.removeEventListener('updateThreadList', onActualThreadUpdated as EventListener);
-        };
-    }, []);
+    // threads are now loaded by ConversationsList component
     return (
         <>
         <span aria-hidden="true" style={{ display: 'none' }}>{String(refreshToggle)}</span>
@@ -210,95 +179,11 @@ export default function Navbar() {
                     <div className="flex-1 h-px bg-gray-700" />
                 </motion.div>
                 <div className="flex-1 min-h-0 overflow-y-auto conversations-scroll" aria-label="Conversations list">
-                    {threadsLoaded ? (
-                        (() => {
-                            const sortedThreads = [...threads].sort(
-                                (a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0)
-                            );
-
-                            const now = Date.now();
-                            const msDay = 24 * 60 * 60 * 1000;
-                            const msWeek = 7 * msDay;
-                            const msMonth = 30 * msDay;
-
-                            const lastDay: typeof sortedThreads = [];
-                            const lastWeek: typeof sortedThreads = [];
-                            const lastMonth: typeof sortedThreads = [];
-                            const older = new Map<string, typeof sortedThreads[number][]>();
-
-                            const getSafeDate = (t: typeof sortedThreads[number]) => {
-                                if (!t.date) return new Date(0);
-                                const d = t.date instanceof Date ? t.date : ensureDate(t.date as any);
-                                return d ?? new Date(0);
-                            };
-
-                            for (const t of sortedThreads) {
-                                const d = getSafeDate(t);
-                                const diff = now - d.getTime();
-
-                                if (diff <= msDay) {
-                                    lastDay.push(t);
-                                } else if (diff <= msWeek) {
-                                    lastWeek.push(t);
-                                } else if (diff <= msMonth) {
-                                    lastMonth.push(t);
-                                } else {
-                                    const label = d.toLocaleString(undefined, { month: "long", year: "numeric" });
-                                    const arr = older.get(label) ?? [];
-                                    arr.push(t);
-                                    older.set(label, arr);
-                                }
-                            }
-
-                            const renderSection = (title: string, items: typeof sortedThreads) => {
-                                if (!items || items.length === 0) return null;
-                                return (
-                                    <div key={title} className="space-y-1 p-1">
-                                        <div className="text-xs uppercase text-gray-400 px-2 py-1">{title}</div>
-                                            {items.map((t) => (
-                                            <motion.div
-                                                key={t.id}
-                                                className="w-full p-2 rounded-md hover:bg-gray-700 cursor-pointer"
-                                                whileHover={{ scale: 1.02 }}
-                                                whileTap={{ scale: 0.98 }}
-                                                onClick={() => handleThreadClick(t as any)}
-                                            >
-                                                <div className="text-sm truncate">{t.name}</div>
-                                                
-                                            </motion.div>
-                                        ))}
-                                    </div>
-                                );
-                            };
-
-                            return (
-                                <div className="space-y-2 p-1">
-                                    {renderSection("Last day", lastDay)}
-                                    {renderSection("Last week", lastWeek)}
-                                    {renderSection("Last month", lastMonth)}
-                                    {[...older.entries()].map(([label, items]) => (
-                                        <div key={label} className="space-y-1 p-1">
-                                            <div className="text-xs uppercase text-gray-400 px-2 py-1">{label}</div>
-                                            {items.map((t) => (
-                                                <motion.div
-                                                    key={t.id}
-                                                    className={`w-full p-2 rounded-md hover:bg-gray-700 cursor-pointer ${getActualThread()?.id === t.id ? 'bg-gray-700' : ''}`}
-                                                    whileHover={{ scale: 1.02 }}
-                                                    whileTap={{ scale: 0.98 }}
-                                                    onClick={() => handleThreadClick(t)}
-                                                >
-                                                    <div className="text-sm truncate">{t.name}</div>
-                                                </motion.div>
-                                            ))}
-                                        </div>
-                                    ))}
-                                </div>
-                            );
-                        })()
-                    ) : (
-                        <div className="p-4 text-sm text-gray-400">Loading conversations...</div>
-                    )}
-
+                    <ConversationsList
+                        onThreadClick={(t: any) => handleThreadClick(t)}
+                        activeThreadId={getActualThread()?.id ?? null}
+                        showDate={false}
+                    />
                 </div>
             </div>
             <motion.div className="my-6 flex items-center flex-shrink-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}>

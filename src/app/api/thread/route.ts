@@ -31,6 +31,7 @@ export async function GET(_req: NextRequest) {
           idThread: thread.idThread ?? thread.id,
           name: thread.name,
           createdAt: thread.createdAt,
+          updatedAt: thread.updatedAt,
           context: thread.context ?? null,
           model: thread.model ?? null,
           messages: thread.messages ?? [],
@@ -79,6 +80,7 @@ export async function GET(_req: NextRequest) {
           idThread: thread.idThread ?? thread.id,
           name: thread.name,
           createdAt: thread.createdAt,
+          updatedAt: thread.updatedAt,
           context: thread.context ?? null,
           model: thread.model ?? null,
           messages: thread.messages ?? [],
@@ -224,6 +226,11 @@ export async function POST(req: NextRequest) {
           data: mapped,
           skipDuplicates: true,
         });
+        const update = await prisma.thread.update({
+          where: { idThread: mapped[0].idThread },
+          data: { updatedAt: new Date() },
+          
+        })
 
         return NextResponse.json({ ok: true, inserted: result.count });
       

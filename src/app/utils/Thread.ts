@@ -6,7 +6,7 @@ import { Mistral } from '@mistralai/mistralai';
 import { getApiKey } from './ApiKey';
 import { getUser } from './User';
 import { toast, Bounce } from 'react-toastify';
-import { utcNow, utcNowPlus, ensureIso, ensureDate } from './DateUTC';
+import { utcNow, utcNowPlus, ensureIso, ensureDate, parseToUtc } from './DateUTC';
 
 type Thread = { id: string; name: string, date?: Date, messages?: Messages, status?: 'local' | 'remote' | 'unknown', context : string, model?: string, share: boolean };
 
@@ -172,7 +172,7 @@ export async function openSharedThread(id: string) : Promise<Thread> {
                 const thread: Thread = {
                     id: payload.idThread ?? payload.id ?? String(payload.id ?? id),
                     name: payload.name ?? `Shared ${id}`,
-                    date: payload.createdAt ? (ensureDate(payload.createdAt) as Date) : utcNow(),
+                    date: payload.updatedAt ? (parseToUtc(payload.updatedAt) as Date) : utcNow(),
                     messages: mappedMsgs as any,
                     status: 'remote',
                     context: payload.context ?? '',
@@ -301,7 +301,7 @@ export async function reloadThread() {
                 return {
                     id: r.idThread ?? r.id ?? String(r.id),
                     name: r.name ?? defaultThreadName,
-                    date: parseTimestamp(r.createdAt),
+                    date: parseToUtc(r.updatedAt),
                     messages: mappedMsgs as any,
                     status: 'remote',
                     context: r.context ?? '',
@@ -523,6 +523,7 @@ export async function handleMessageSend(thread: Thread, content: string) {
         await createServerThread(thread);
     }
     await syncServerThread(thread);
+    thread.date = utcNow();
     updateAllThreadsList(thread);
     const url = `/${thread.id}`;
     if (typeof window !== 'undefined' && window.history && window.history.pushState) {
@@ -551,6 +552,7 @@ async function createServerThread(thread: Thread) {
                     context: thread.context,
                     model: thread.model,
                     createdAt: thread.date ? (thread.date instanceof Date ? thread.date.toISOString() : ensureIso(thread.date)) : utcNow().toISOString(),
+                    updatedAt: thread.date ? (thread.date instanceof Date ? thread.date.toISOString() : ensureIso(thread.date)) : utcNow().toISOString(),
                 } })
             });
             if (!res.ok) {
@@ -564,6 +566,7 @@ async function createServerThread(thread: Thread) {
 
             thread.status = 'remote';
             updateThreadList();
+            console.log('Thread created remotely', thread.id);
             allThreads.push(thread);
         } catch (err) {
             console.error('createServerThread API error', err);

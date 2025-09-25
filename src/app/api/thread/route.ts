@@ -91,7 +91,7 @@ export async function GET(_req: NextRequest) {
       // fallthrough to listing all threads
     }
     const access_token = _req.headers.get('authorization')?.split(' ')[1] || _req.cookies.get('access_token')?.value;
-    let rows : any[];
+    let rows : any[] = [];
     if (access_token) {
       try {
       const dbToken = await prisma.accessToken.findUnique({
@@ -112,9 +112,7 @@ export async function GET(_req: NextRequest) {
       console.error('GET /api/thread token lookup failed', err);
       rows = [];
       }
-    } else {
-      rows = await prisma.thread.findMany({ include: { messages: true }, orderBy: { createdAt: 'asc' } });
-    }
+    } 
     return NextResponse.json(rows);
   } catch (err) {
     console.error('GET /api/thread error', err);

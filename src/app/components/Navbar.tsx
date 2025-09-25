@@ -64,7 +64,27 @@ export default function Navbar() {
         } catch (e) {
         }
     }
-    
+    function logout() {
+        const preserve = new Set(['mistralApiKey', 'actualModel', 'context', 'fastModelList']);
+        try {
+            const toRemove: string[] = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && !preserve.has(key)) toRemove.push(key);
+            }
+            toRemove.forEach(k => localStorage.removeItem(k));
+        } catch (err) {
+            console.error('Failed to clear localStorage', err);
+        }
+        try {
+            fetch('/api/auth/logout', { method: 'POST' }).catch(err => {
+                console.error('Logout request failed', err);
+            });
+        } catch (err) {
+            console.error('Logout failed', err);
+        }
+        router.replace('/login');
+    }
     useEffect(() => {
         let cancelled = false;
         async function loadUser() {
@@ -303,7 +323,7 @@ export default function Navbar() {
                             <IoMdSettings className="text-lg" />
                             <span>Settings</span>
                         </motion.button>
-                        <motion.button className="w-full text-left p-2 rounded hover:bg-gray-700 text-red-400 flex items-center space-x-4" type="button" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                        <motion.button onClick={() => logout()} className="w-full text-left p-2 rounded hover:bg-gray-700 text-red-400 flex items-center space-x-4" type="button" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                             <FaDoorOpen className="text-lg" />
                             <span>Log Out</span>
                         </motion.button>

@@ -29,7 +29,7 @@ export default function UserSettingsModal({ onClose }: { onClose: () => void }) 
                             <FaRobot className='inline text-2xl' />
                             <span>Modele</span>
                         </motion.li>
-                        <motion.li onClick={() => setPanel('context')} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className={`p-2 rounded-md flex items-center cursor-pointer space-x-1 ${panel === 'modele' ? 'bg-gray-700' : 'hover:bg-gray-700'}`}>
+                        <motion.li onClick={() => setPanel('context')} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className={`p-2 rounded-md flex items-center cursor-pointer space-x-1 ${panel === 'context' ? 'bg-gray-700' : 'hover:bg-gray-700'}`}>
                             <AiOutlineBook className='inline text-2xl' />
                             <span>Context</span>
                         </motion.li>                           

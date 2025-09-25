@@ -53,6 +53,7 @@ export default function LoginPage() {
             <div className="min-h-screen flex items-center justify-center">
                 <div className="p-8 rounded shadow-md w-full max-w-md">
                     <h1 className="text-2xl font-bold mb-4">Sign in</h1>
+                    <p className="mb-6">This tool is not an official one is just project for learning some concepts.</p>
                     <GoogleLogin onSuccess={handleGoogleSuccess} onError={handleGoogleError} />
                 </div>
             </div>

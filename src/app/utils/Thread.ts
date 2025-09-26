@@ -451,7 +451,7 @@ export function updateAllThreadsList(updated: Thread) {
 
 export async function handleMessageSend(thread: Thread, content: string) {
     const lastMessage = getLastMessage(thread);
-    const history = getHistory(thread, lastMessage).slice(-20);
+    const history = getHistory(thread, lastMessage);
     const userMessage: Message = {
         id: generateUUID() ?? '',
         text: content,
@@ -529,6 +529,168 @@ export async function handleMessageSend(thread: Thread, content: string) {
     if (typeof window !== 'undefined' && window.history && window.history.pushState) {
         window.history.pushState({}, '', url);
     } 
+}
+
+export async function handleRegenerateMessage(thread : Thread, message: Message, model : string) {
+    if (message.sender !== 'assistant') return;
+    if (!thread || !message) return;
+    const msgs = thread.messages ?? [];
+    const parentId = message.parentId ?? null;
+    if (!parentId) return;
+
+    const history = getHistory(thread, msgs.find(m => m.id === parentId) ?? null);
+    const newMessage: Message = {
+        id: generateUUID(),
+        text: 'Regenerate Message',
+        thinking : '',
+        sender: 'assistant',
+        timestamp: utcNowPlus(1000),
+        parentId: parentId,
+        status: 'local'
+    }
+    thread.messages = [...msgs, newMessage];
+    updateActualThread();
+    const client = new Mistral({apiKey: getApiKey()});
+    const messagesList = [
+            {
+                role: "system",
+                content: thread.context || getContext() || "You are a helpful assistant."
+            },
+            ...history,
+        ];
+    const chatResponse = await client.chat.complete({
+        model: model || thread.model || getActualModel(),
+        messages: messagesList as any,
+    });
+    if (!chatResponse || !chatResponse.choices || chatResponse.choices.length === 0) {
+        newMessage.text = "Error: no response";
+        newMessage.thinking = "";
+        return;
+    }
+    const choice = chatResponse.choices[0];
+    console.log('Regenerate choice', choice);
+    let finalText = "";
+    const msgContent: unknown = choice?.message?.content ?? "";
+    if (Array.isArray(msgContent)) {
+        finalText = (msgContent as Array<{ type?: string; text?: string }>)
+            .filter((block) => block?.type === "text")
+            .map((block) => block?.text ?? "")
+            .join("\n");
+    }
+    else if (typeof msgContent === "string") {
+        finalText = msgContent;
+    }
+    let reasoning = "";
+    const thinkingField: unknown = (choice as any)?.thinking ?? "";
+    if (Array.isArray(thinkingField)) {
+        reasoning = (thinkingField as Array<{ type?: string; thinking?: string }>)
+            .filter((block) => block?.type === "thinking")
+            .map((block) => block?.thinking ?? "")
+            .join("\n");
+    }
+    else if (typeof thinkingField === "string") {
+        reasoning = thinkingField;
+    }
+    newMessage.text = finalText;
+    newMessage.thinking = reasoning;
+    updateActualThread();
+    if ((thread.status as any) !== 'remote') {
+        await createServerThread(thread);
+    }
+    await syncServerThread(thread);
+    thread.date = utcNow();
+    updateAllThreadsList(thread);
+    const url = `/${thread.id}`;
+    if (typeof window !== 'undefined' && window.history && window.history.pushState) {
+        window.history.pushState({}, '', url);
+    }
+    return newMessage;    
+}
+
+export async function handleEditMessage(thread : Thread, message: Message, editMessage : string) {
+    if (message.sender !== 'user') return;
+    if (!thread || !message) return;
+    const msgs = thread.messages ?? [];
+    const parentId = message.parentId ?? null;
+    if (!parentId) return;
+    const history = getHistory(thread, msgs.find(m => m.id === parentId) ?? null);
+    const newUserMessage: Message = {
+        id: generateUUID(),
+        text: editMessage,
+        thinking : '',
+        sender: 'user',
+        timestamp: utcNowPlus(1000),
+        parentId: parentId,
+        status: 'local'
+    }
+    const newMessage: Message = {
+        id: generateUUID(),
+        text: '...',
+        thinking : '',
+        sender: 'assistant',
+        timestamp: utcNowPlus(2000),
+        parentId: newUserMessage.id,
+        status: 'local'
+    }
+    thread.messages = [...msgs, newUserMessage, newMessage];
+    updateActualThread();
+    const client = new Mistral({apiKey: getApiKey()});
+    const messagesList = [
+            {
+                role: "system",
+                content: thread.context || getContext() || "You are a helpful assistant."
+            },
+            ...history,
+            {
+                role: "user",
+                content: editMessage
+            },
+        ];
+    const chatResponse = await client.chat.complete({
+        model: thread.model || getActualModel(),
+        messages: messagesList as any,
+    });
+    if (!chatResponse || !chatResponse.choices || chatResponse.choices.length === 0) {
+        newMessage.text = "Error: no response";
+        newMessage.thinking = "";
+        return;
+    }
+    const choice = chatResponse.choices[0];
+    let finalText = "";
+    const msgContent: unknown = choice?.message?.content ?? "";
+    if (Array.isArray(msgContent)) {
+        finalText = (msgContent as Array<{ type?: string; text?: string }>)
+            .filter((block) => block?.type === "text")
+            .map((block) => block?.text ?? "")
+            .join("\n");
+    } else if (typeof msgContent === "string") {
+        finalText = msgContent;
+    }
+    let reasoning = "";
+    const thinkingField: unknown = (choice as any)?.thinking ?? "";
+    if (Array.isArray(thinkingField)) {
+        reasoning = (thinkingField as Array<{ type?: string; thinking?: string }>)
+            .filter((block) => block?.type === "thinking")
+            .map((block) => block?.thinking ?? "")
+            .join("\n");
+    }
+    else if (typeof thinkingField === "string") {
+        reasoning = thinkingField;
+    }
+    newMessage.text = finalText;
+    newMessage.thinking = reasoning;
+    updateActualThread();
+    if ((thread.status as any) !== 'remote') {
+        await createServerThread(thread);
+    }
+    await syncServerThread(thread);
+    thread.date = utcNow();
+    updateAllThreadsList(thread);
+    const url = `/${thread.id}`;
+    if (typeof window !== 'undefined' && window.history && window.history.pushState) {
+        window.history.pushState({}, '', url);
+    }
+
 }
 
 async function updateThreadList() {
@@ -696,7 +858,7 @@ export async function updateServerThread(thread: Thread) {
 }
 
 async function generateThreadName(thread: Thread) : Promise<string | null> {
-    const history = getHistory(thread).slice(-20);
+    const history = getHistory(thread);
     if (history.length === 0) return null;
     const client = new Mistral({apiKey: getApiKey()});
     const prompt = `Generate a short and descriptive title for the following conversation. The title should be concise, ideally under 5 words, and capture the main topic or theme of the discussion. In the language used in the conversation. Do not use quotation marks or punctuation in the title.`
@@ -720,37 +882,34 @@ async function generateThreadName(thread: Thread) : Promise<string | null> {
 
 }
 
-export function getHistory(thread: Thread, lastMessage?: Message | null): any[] {
+export function getHistory(thread: Thread, lastMessage?: Message | null, limit: number = 20): any[] {
     try {
-        const msgs = (thread.messages ?? []) as any[];
+        thread = thread ?? getActualThread() ?? null;
+        let parentId = lastMessage?.id ?? null;
+        console.log('getHistory parentId', parentId);
+        console.log(thread);
+        if (!thread || !parentId) return [];
+        if (parentId === 'root') return [];
+        if (!thread.messages || thread.messages.length === 0) return [];
+        if (!lastMessage) return [];
+        const history = [];
 
-        // find index of lastMessage if provided
-        let endIndex = msgs.length - 1;
-        if (lastMessage) {
-            const idxById = (m: any) => (m && typeof m.id !== 'undefined' && (lastMessage as any).id !== 'undefined' && m.id === (lastMessage as any).id);
-            const idx = msgs.findIndex(m => m === lastMessage || idxById(m));
-            if (idx !== -1) endIndex = idx;
+        while (history.length < limit && (parentId != null)) {
+            const msg = (thread.messages ?? []).find(m => m.id === parentId);
+            if (!msg) break;
+            history.push({
+                role: msg.sender === 'user' ? 'user' : 'assistant',
+                content: msg.text ?? ''
+            });
+            parentId = msg.parentId ?? null;
+            if (parentId === 'root') break;
+            
+
         }
-
-        // slice from start to the lastMessage (inclusive)
-        const slice = msgs.slice(0, endIndex + 1);
-
-        // helper to format a message into text
-        const format = (m: any) => {
-            if (!m) return '';
-            if (typeof m === 'string') return m;
-            const content = typeof m.content === 'string' ? m.content : (m.text ?? m.body ?? JSON.stringify(m));
-            const role = m.role || m.sender || m.from || m.author;
-            return role ? {role, content} : {content};
-        };
-
-        const parts: any[] = [];
-        for (const m of slice) {
-            const f = format(m);
-            if (f) parts.push(f);
-        }
-
-        return parts;   
+        
+        
+        return history;
+        
     } catch (e) {
         return [];
     }

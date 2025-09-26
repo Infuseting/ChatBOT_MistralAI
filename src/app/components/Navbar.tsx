@@ -1,5 +1,6 @@
 "use client";
 import { useState, useRef, useEffect } from 'react';
+import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/react-dom';
 import { useRouter } from 'next/navigation';
 import { FaPlus, FaPencilAlt } from "react-icons/fa";
 import { TbLayoutSidebarLeftCollapse, TbLayoutSidebarLeftExpand } from "react-icons/tb";
@@ -21,6 +22,14 @@ export default function Navbar() {
     const router = useRouter();
     const waitingForOpenRef = useRef(false);
     const detailsRef = useRef<HTMLDetailsElement | null>(null);
+    // Floating UI for user menu
+    const { x: userMenuX, y: userMenuY, refs: userMenuRefs, strategy: userMenuStrategy, update: userMenuUpdate } = useFloating({
+        placement: 'top-start',
+        middleware: [offset(8), flip(), shift()],
+        whileElementsMounted: autoUpdate,
+    });
+    const userMenuTriggerRef = useRef<HTMLElement | null>(null);
+    const userMenuElRef = useRef<HTMLElement | null>(null);
     const [showSettings, setShowSettings] = useState(false);
     const [showSearch, setShowSearch] = useState(false);
     const navAnimate = navbarOpen ? { x: 0, opacity: 1 } : { x: -280, opacity: 0 };
@@ -190,20 +199,15 @@ export default function Navbar() {
                     <div className="flex-1 h-px bg-gray-700" />
                 </motion.div>
             
-            <div className="relative"> 
-                <details
-                    ref={detailsRef}
-                    onToggle={(e) => setMenuOpen((e.target as HTMLDetailsElement).open)}
-                    className="mt-auto w-full relative"
-                    aria-label="User menu"
-                >
-                    <summary className="list-none w-full p-2 rounded-md hover:bg-gray-600 flex items-center cursor-pointer" role="button">
-                        <img src={user?.picture ?? 'https://placehold.co/32x32'} alt="User Avatar" className="w-6 h-6 rounded-full mr-2" />
-                        <span className="text-sm">{user?.name ?? 'Username'}</span>
-                        <IoMdArrowDropdown className={`ml-auto text-gray-400 select-none transform transition-transform duration-200 ${menuOpen ? 'rotate-180' : ''}`} />
-                    </summary>
+            <div className="relative">
+                <div ref={(node) => { try { userMenuRefs.setReference(node as any); userMenuTriggerRef.current = node as HTMLElement | null; } catch {} }} className="list-none w-full p-2 rounded-md hover:bg-gray-600 flex items-center cursor-pointer" role="button" onClick={() => { setMenuOpen(prev => !prev); setTimeout(() => userMenuUpdate?.(), 0); }}>
+                    <img src={user?.picture ?? 'https://placehold.co/32x32'} alt="User Avatar" className="w-6 h-6 rounded-full mr-2" />
+                    <span className="text-sm">{user?.name ?? 'Username'}</span>
+                    <IoMdArrowDropdown className={`ml-auto text-gray-400 select-none transform transition-transform duration-200 ${menuOpen ? 'rotate-180' : ''}`} />
+                </div>
 
-                    <div className="absolute left-0 bottom-full mb-2 w-56 p-2 bg-gray-800 rounded-md border border-gray-700 shadow-md space-y-1 z-50">
+                {menuOpen && (
+                    <div ref={(node) => { try { userMenuRefs.setFloating(node as any); userMenuElRef.current = node as HTMLElement | null; } catch {} }} style={{ position: userMenuStrategy as any, left: userMenuX ?? 0, top: userMenuY ?? 0, zIndex: 9999 }} className="w-56 p-2 bg-gray-800 rounded-md border border-gray-700 shadow-md space-y-1">
                         <motion.button onClick={() => setShowSettings(true)} className="w-full text-left p-2 rounded hover:bg-gray-700 flex items-center space-x-4" type="button" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                             <IoMdSettings className="text-lg" />
                             <span>Settings</span>
@@ -213,7 +217,7 @@ export default function Navbar() {
                             <span>Log Out</span>
                         </motion.button>
                     </div>
-                </details>
+                )}
             </div>
             {showSettings && <UserSettingsModal onClose={() => setShowSettings(false)} />}
             {showSearch && <SearchModal onClose={() => setShowSearch(false)} />}

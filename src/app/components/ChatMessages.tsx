@@ -1,8 +1,10 @@
-import { getActualThread, Thread } from "../utils/Thread";
+import { getActualThread, Thread, handleRegenerateMessage, handleEditMessage } from "../utils/Thread";
 import { Message } from "../utils/Message";
 import { parseMarkdown, isAtRightmostBranch } from "../utils/ChatMessagesHelper";
-
+import { FaCopy, FaEdit, FaSync, FaTimes } from "react-icons/fa";
+import { getFastModelList, getActualModel } from '../utils/Models';
 import React, { useMemo, useState, useEffect, useRef } from "react";
+import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/react-dom';
 import { toast, Bounce } from 'react-toastify';
 
 
@@ -59,6 +61,107 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
     const [selection, setSelection] = useState<Record<string, number>>({});
     const [isRightBranch, setIsRightBranch] = useState(true);
     const [refreshToggle, setRefreshToggle] = useState(false); 
+    const [regenMenuOpenFor, setRegenMenuOpenFor] = useState<string | null>(null);
+    const [regenSubmenuOpenFor, setRegenSubmenuOpenFor] = useState<string | null>(null);
+    const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+    const [editingText, setEditingText] = useState<string>('');
+    const [editingSubmitting, setEditingSubmitting] = useState<boolean>(false);
+    const editingTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const resizeEditingTextarea = () => {
+        try {
+            const ta = editingTextareaRef.current;
+            if (!ta) return;
+            // reset height to recalc
+            ta.style.height = 'auto';
+            const max = 10000; // max height px
+            const newH = Math.min(max, ta.scrollHeight);
+            ta.style.height = `${newH}px`;
+            // ensure vertical overflow when hitting max
+            ta.style.overflowY = ta.scrollHeight > max ? 'auto' : 'hidden';
+        } catch (e) {}
+    };
+
+    // Floating UI hooks for main menu
+    const { x: menuX, y: menuY, refs: menuRefs, strategy: menuStrategy, middlewareData: menuMiddlewareData, update: menuUpdate } = useFloating({
+        placement: 'bottom-start',
+        middleware: [offset(0), flip({ fallbackAxisSideDirection: 'start' }), shift()],
+        whileElementsMounted: autoUpdate,
+    });
+
+    // Floating UI hooks for submenu
+    const { x: subX, y: subY, refs: subRefs, strategy: subStrategy, middlewareData: subMiddlewareData, update: subUpdate } = useFloating({
+        placement: 'right-start',
+        middleware: [offset(0), flip({ fallbackAxisSideDirection: 'end' }), shift()],
+        whileElementsMounted: autoUpdate,
+    });
+
+    // Keep explicit refs to the actual DOM nodes so outside-click detection is reliable
+    const menuTriggerRef = useRef<HTMLElement | null>(null);
+    const menuElementRef = useRef<HTMLElement | null>(null);
+    const subTriggerRef = useRef<HTMLElement | null>(null);
+    const subElementRef = useRef<HTMLElement | null>(null);
+
+    // Close regen menus when any scroll/interaction occurs (so they don't linger)
+    useEffect(() => {
+        const onScrollClose = () => {
+            setRegenMenuOpenFor(null);
+            setRegenSubmenuOpenFor(null);
+        };
+        window.addEventListener('scroll', onScrollClose, true);
+        window.addEventListener('wheel', onScrollClose, { passive: true, capture: true } as any);
+        window.addEventListener('touchstart', onScrollClose, { passive: true, capture: true } as any);
+        return () => {
+            window.removeEventListener('scroll', onScrollClose, true);
+            window.removeEventListener('wheel', onScrollClose as any, { passive: true, capture: true } as any);
+            window.removeEventListener('touchstart', onScrollClose as any, { passive: true, capture: true } as any);
+        };
+    }, []);
+
+    // Close menus when clicking/tapping outside the reference or floating elements
+    useEffect(() => {
+        const onPointerDown = (ev: PointerEvent) => {
+            try {
+                const target = ev.target as Node | null;
+                if (!target) return;
+
+                const insideMenu = (menuTriggerRef.current && menuTriggerRef.current.contains(target)) || (menuElementRef.current && menuElementRef.current.contains(target));
+                const insideSub = (subTriggerRef.current && subTriggerRef.current.contains(target)) || (subElementRef.current && subElementRef.current.contains(target));
+
+                if (!insideMenu && !insideSub) {
+                    setRegenMenuOpenFor(null);
+                    setRegenSubmenuOpenFor(null);
+                }
+            } catch (e) {
+                // ignore
+            }
+        };
+        document.addEventListener('pointerdown', onPointerDown, true);
+        return () => document.removeEventListener('pointerdown', onPointerDown, true);
+    }, []);
+
+    // Focus textarea when editing starts
+    useEffect(() => {
+        if (editingMessageId) {
+            setTimeout(() => {
+                try {
+                    const ta = editingTextareaRef.current;
+                    if (ta) {
+                        ta.focus();
+                        // put caret at the end so user can continue typing
+                        const len = ta.value ? ta.value.length : 0;
+                        try { ta.setSelectionRange(len, len); } catch (e) {}
+                        resizeEditingTextarea();
+                    }
+                } catch (e) {}
+            }, 20);
+        }
+    }, [editingMessageId]);
+
+    // Resize textarea on mount/editingText change
+    useEffect(() => {
+        try { resizeEditingTextarea(); } catch (e) {}
+    }, [editingText, editingMessageId]);
+
 
     // notify parent when right-branch state changes
     useEffect(() => {
@@ -134,6 +237,41 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
         });
         setRefreshToggle(v => !v);
     }
+
+    // Wait until getActualThread returns a thread containing a message with targetId
+    // Polls until timeout and updates local messages when seen.
+    async function waitForMessageResync(targetId: string, timeoutMs = 8000, intervalMs = 300) {
+        if (!targetId) return null;
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+            try {
+                const t = await getActualThread();
+                const newMsgs = t?.messages ?? [];
+                if (newMsgs.some(m => m && m.id === targetId)) {
+                    // update local state to the authoritative server copy
+                    setMessages(prev => {
+                        if (!prev || prev.length === 0) return newMsgs;
+                        if (prev.length === newMsgs.length) {
+                            let same = true;
+                            for (let i = 0; i < prev.length; i++) {
+                                if ((prev[i].id ?? '') !== (newMsgs[i].id ?? '')) { same = false; break; }
+                            }
+                            if (same) return newMsgs;
+                        }
+                        return newMsgs;
+                    });
+                    setRefreshToggle(v => !v);
+                    return newMsgs.find(m => m.id === targetId) ?? null;
+                }
+            } catch (e) {
+                // ignore and retry
+            }
+            await new Promise(res => setTimeout(res, intervalMs));
+        }
+        return null;
+    }
+
+
     // compute branch following selection (defaults to 0 when missing)
     function computeBranch(sel: Record<string, number>) {
         const branch: Message[] = [];
@@ -280,8 +418,28 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
         prevThreadIdRef.current = thread.id;
     }, [messages.length, thread.id]);
 
-    // When selection or branch changes scroll the conversation to show the most recent branch
+
+   const prevMsgCountForScrollRef = useRef<number | null>(null);
+   const prevThreadIdForScrollRef = useRef<string | null>(null);
     useEffect(() => {
+        // Decide whether we should auto-scroll:
+        // - First time the thread is loaded (thread id changed)
+        // - Or when the number of messages increases (new message arrived)
+        const prevCount = prevMsgCountForScrollRef.current ?? null;
+        const prevThread = prevThreadIdForScrollRef.current ?? null;
+        const shouldScroll = (() => {
+            if (prevThread !== thread.id) return true; // new thread / first load
+            if (prevCount == null) return true; // first mount
+            if (messages.length > prevCount) return true; // new message
+            return false;
+        })();
+
+        // update trackers for next run
+        prevMsgCountForScrollRef.current = messages.length;
+        prevThreadIdForScrollRef.current = thread.id;
+
+        if (!shouldScroll) return;
+
         let raf = 0;
         raf = requestAnimationFrame(() => {
             try {
@@ -298,20 +456,15 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
                     }
                     const el = root.querySelector(`[data-msg-id="${lastId}"]`) as HTMLElement | null;
                     if (el) {
-                        // try native scrollIntoView first
                         if (typeof el.scrollIntoView === 'function') {
                             el.scrollIntoView({ behavior: 'smooth', block: 'end' });
                         }
-
-                        // additionally ensure the nearest scrollable ancestor shows the element with extra padding
                         let scroller: HTMLElement | null = root;
                         while (scroller && scroller.scrollHeight <= scroller.clientHeight) scroller = scroller.parentElement as HTMLElement | null;
-
                         if (scroller) {
                             const elRect = el.getBoundingClientRect();
                             const scrollerRect = scroller.getBoundingClientRect();
                             const delta = elRect.bottom - scrollerRect.bottom;
-                            // If element bottom is below scroller bottom, scroll by that amount plus padding.
                             const scrollBy = Math.max(0, delta) + EXTRA_PADDING;
                             if (scrollBy > 0) {
                                 scroller.scrollBy({ top: scrollBy, behavior: 'smooth' });
@@ -331,7 +484,7 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
             }
         });
         return () => { if (raf) cancelAnimationFrame(raf); };
-    }, [selection, branch.length]);
+    }, [messages.length, thread.id]); // only react to thread / messages changes
 
     function navigate(parentId: string, newIndex: number) {
         const newSel = { ...selection, [parentId]: newIndex };
@@ -346,49 +499,203 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
         setSelection(filtered);
     }
 
-    
-    
-
-    // after render, find code blocks emitted by parseMarkdown and highlight them lazily
+    function jumpToMessage(message: Message) {
+        if (!message || !messages || messages.length === 0) return;
+        const targetMsg = messages.find(m => m.id === message.id) ?? message;
+        console.log(targetMsg);
+        const newSel: Record<string, number> = {};
+        let cur: Message | undefined = targetMsg;
+        while (cur) {
+            const parentId: string = cur.parentId && cur.parentId.length > 0 ? cur.parentId : 'root';
+            const siblings = childrenMap.get(parentId) ?? [];
+            const idx = siblings.findIndex(s => s.id === cur!.id);
+            console.log(idx);
+            if (idx >= 0) newSel[parentId] = idx;
+            if (parentId === 'root') break;
+            cur = messages.find(m => m.id === parentId);
+            if (!cur) break;
+        }
+        setSelection(newSel);
+    }
     
     
 
     return (
         <div ref={rootRef} className="flex flex-col space-y-4 p-4 lg:max-w-220 md:max-w-160 max-w-80 mx-auto">
-            {/* root navigator if multiple root children */}
-            <div className="flex items-center justify-between">
-                {(() => {
-                    const roots = childrenMap.get('root') ?? [];
-                    if (roots.length <= 1) return null;
-                    const idx = selection['root'] ?? 0;
-                    return (
-                        <div className="flex items-center justify-center text-sm text-gray-400 space-x-2">
-                            <button onClick={() => navigate('root', Math.max(0, idx - 1))} className="px-2">◀</button>
-                            <div>{idx + 1} / {roots.length}</div>
-                            <button onClick={() => navigate('root', Math.min(roots.length - 1, idx + 1))} className="px-2">▶</button>
-                        </div>
-                    );
-                })()}
-            </div>
-
+            
+                    
             {/* render branch messages */}
             {branchWithKeys.map(({ m, key }, i) => (
-                <div ref={i === branchWithKeys.length - 1 ? undefined : undefined} data-msg-id={key} key={key} className={`${i === 0 ? 'mt-[15%]' : i === branchWithKeys.length - 1 ? '2xl:mb-[10%] xl:mb-[10%] lg:mb-[10%] md:mb-[10%] sm:mb-[35%] mb-[40%]' : ''} ${m.sender === 'assistant' ? "max-w-[100%]" : "max-w-[80%]"} p-3 rounded-md ${m.sender === 'user' ? 'self-end bg-indigo-600 text-white' : 'self-star text-white'}`}>
-                    <div className="text-lg">{parseMarkdown(m.text)}</div>
-                    {/* if this message has multiple children, show navigator */}
+                <div ref={i === branchWithKeys.length - 1 ? undefined : undefined} data-msg-id={key} key={key} className={`${i === 0 ? 'mt-[15%]' : i === branchWithKeys.length - 1 ? '2xl:mb-[10%] xl:mb-[10%] lg:mb-[10%] md:mb-[10%] sm:mb-[35%] mb-[40%]' : ''} ${m.sender === 'assistant' ? "max-w-[100%] min-w-[100%]" : "max-w-[80%] min-w-[80%] text-end"} p-3 rounded-md ${m.sender === 'user' ? 'self-end text-white' : 'self-star text-white'}`}>
+                    <div className={`text-lg ${m.sender === 'user' ? 'bg-indigo-600 p-2 rounded-md' : ''}`}>
+                        {m.sender === 'assistant' ? parseMarkdown(m.text) : (
+                            editingMessageId === m.id ? (
+                                <textarea ref={editingTextareaRef} rows={1} value={editingText} onChange={(e) => { setEditingText(e.target.value); resizeEditingTextarea(); }} onKeyDown={async (ev) => {
+                                    if (ev.key === 'Enter' && !ev.shiftKey && !ev.ctrlKey && !ev.altKey) {
+                                        ev.preventDefault();
+                                        if (editingSubmitting) return;
+                                        setEditingSubmitting(true);
+                                        try {
+                                            m.text = editingText;
+                                            await handleEditMessage(thread, m, editingText);
+                                            const synced = m.id ? await waitForMessageResync(m.id) : null;
+                                            if (synced) {
+                                                jumpToMessage(synced);
+                                                await updateThreadMessages();
+                                            } else {
+                                                await updateThreadMessages();
+                                            }
+                                        } catch (e) {
+                                            try { toast.error('Échec de la modification.'); } catch (e) {}
+                                        } finally {
+                                            setEditingSubmitting(false);
+                                            setEditingMessageId(null);
+                                            setEditingText('');
+                                        }
+                                    } else if (ev.key === 'Escape') {
+                                        ev.preventDefault();
+                                        setEditingMessageId(null);
+                                        setEditingText('');
+                                    }
+                                }} className="w-full p-0 rounded bg-transparent text-white resize-none text-right" style={{ border: 'none', outline: 'none', background: 'transparent', textAlign: 'right' }} />
+                                ) : (
+                                // For user messages preserve line breaks when rendering plain text
+                                <p className="whitespace-pre-wrap">{m.text}</p>
+                            )
+                        )}
+                    </div>
+                    
                     {(() => {
-                        const children = childrenMap.get(m.id) ?? [];
-                        if (children.length <= 1) return null;
-                        const idx = selection[m.id] ?? 0;
+                        // Determine the parent and siblings for this message so we can render
+                        // the chooser directly on the item instead of on its parent.
+                        const parentId = (m.parentId && m.parentId.length > 0) ? m.parentId : 'root';
+                        const siblings = childrenMap.get(parentId) ?? [];
+                        // selection is stored keyed by parent id; fall back to finding this message's index
+                        const idxFromSel = selection[parentId];
+                        const foundIdx = siblings.findIndex(s => s.id === m.id);
+                        const idx = (typeof idxFromSel === 'number') ? idxFromSel : (foundIdx >= 0 ? foundIdx : 0);
+
                         return (
-                            <div className="mt-2 flex items-center justify-center text-sm text-gray-400 space-x-2">
-                                <button onClick={() => navigate(m.id, Math.max(0, idx - 1))} className="px-2">◀</button>
-                                <div>{idx + 1} / {children.length}</div>
-                                <button onClick={() => navigate(m.id, Math.min(children.length - 1, idx + 1))} className="px-2">▶</button>
-                            </div>
+                            <>
+                                {m.sender === 'assistant' && (
+                                    <hr className="my-2 border-t border-gray-600" />
+                                )}
+                                <div className={`mt-2 flex items-center ${m.sender === 'assistant' ? 'justify-start flex-row' : 'justify-start flex-row-reverse'} text-sm text-gray-400`}>
+                                    {editingMessageId !== m.id && (
+                                        <>
+                                            <div className={`flex ${siblings.length > 1 ? '' : 'hidden'}`}>
+                                                <button onClick={() => navigate(parentId, Math.max(0, idx - 1))} className="px-2">◀</button>
+                                                <div>{idx + 1} / {siblings.length}</div>
+                                                <button onClick={() => navigate(parentId, Math.min(siblings.length - 1, idx + 1))} className="px-2">▶</button>
+                                            </div>
+                                            <FaCopy title="Copy code" className={`hover:text-white cursor-pointer mx-2`} onClick={() => {
+                                                try {
+                                                    (window as any).handleCopyCode(m.text ?? '');
+                                                } catch (e) {
+                                                }
+                                            }} />
+                                        </>
+                                    )}
+                                    {editingMessageId !== m.id && m.sender === 'assistant' && isRightBranch && (
+                                        <div className={`relative mx-2`}>
+                                            <div ref={(node) => { try { menuRefs.setReference(node as any); menuTriggerRef.current = node as HTMLElement | null; } catch {} }}>
+                                                <FaSync title="Regenerate" className={`hover:text-white cursor-pointer`} onClick={() => {
+                                                    setRegenMenuOpenFor(prev => prev === m.id ? null : m.id);
+                                                    setRegenSubmenuOpenFor(null);
+                                                    setTimeout(() => menuUpdate?.(), 0);
+                                                }} />
+                                            </div>
+                                            {regenMenuOpenFor === m.id && (
+                                                <div ref={(node) => { try { menuRefs.setFloating(node as any); menuElementRef.current = node as HTMLElement | null; } catch {} }} style={{ position: menuStrategy as any, left: menuX ?? 0, top: menuY ?? 0, minWidth: 224, zIndex: 9999 }} className="bg-gray-800 border border-gray-700 rounded-md shadow-lg">
+                                                    <button className="w-full text-left p-2 hover:bg-gray-700" onClick={async () => {
+                                                        try {
+                                                            setRegenMenuOpenFor(null);
+                                                            const usedModel = thread.model || getActualModel();
+                                                            const message = await handleRegenerateMessage(thread, m, usedModel);
+                                                            const synced = message && message.id ? await waitForMessageResync(message.id) : null;
+                                                            if (synced) jumpToMessage(synced);
+                                                            else { await updateThreadMessages(); message && jumpToMessage(message); }
+                                                        } catch (e) {}
+                                                    }}>Regenerate (same model)</button>
+                                                    <div className="border-t border-gray-700" />
+                                                    <div className="relative" onMouseEnter={() => { setRegenSubmenuOpenFor(m.id); setTimeout(() => subUpdate?.(), 0); }} onMouseLeave={() => setRegenSubmenuOpenFor(null)}>
+                                                        <button ref={(node) => { try { subRefs.setReference(node as any); subTriggerRef.current = node as HTMLElement | null; } catch {} }} className="w-full text-left p-2 hover:bg-gray-700">Regenerate with →</button>
+                                                        {regenSubmenuOpenFor === m.id && (
+                                                            <div ref={(node) => { try { subRefs.setFloating(node as any); subElementRef.current = node as HTMLElement | null; } catch {} }} style={{ position: subStrategy as any, left: subX ?? 0, top: subY ?? 0, minWidth: 192, zIndex: 9999 }} className="bg-gray-800 border border-gray-700 rounded-md shadow-lg">
+                                                                {getFastModelList().map((fm) => (
+                                                                    <button key={fm} className="w-full text-left p-2 hover:bg-gray-700" onClick={async () => {
+                                                                        try {
+                                                                            setRegenMenuOpenFor(null);
+                                                                            setRegenSubmenuOpenFor(null);
+                                                                            const message = await handleRegenerateMessage(thread, m, fm);
+                                                                            const synced = message && message.id ? await waitForMessageResync(message.id) : null;
+                                                                            if (synced) jumpToMessage(synced);
+                                                                            else { await updateThreadMessages(); message && jumpToMessage(message); }
+                                                                        } catch (e) {}
+                                                                    }}>{fm}</button>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                    {m.sender === 'user' && isRightBranch && (
+                                        <>
+                                            {editingMessageId && editingMessageId !== m.id && (
+                                                <button className="mx-2 text-sm px-2 py-1 rounded bg-gray-700" onClick={() => {
+                                                    try { toast.error('Un autre message est en cours d\'édition.'); } catch (e) {}
+                                                }}>Édition en cours</button>
+                                            )}
+                                            {editingMessageId === m.id ? (
+                                                <div className="flex items-center space-x-2 mx-2">
+                                                    <button disabled={editingSubmitting} className={`px-3 py-1 rounded bg-indigo-600 text-white ${editingSubmitting ? 'opacity-50' : ''}`} onClick={async () => {
+                                                        if (editingSubmitting) return;
+                                                        setEditingSubmitting(true);
+                                                        try {
+                                                            m.text
+                                                            await handleEditMessage(thread, m, editingText );
+                                                            const synced = m.id ? await waitForMessageResync(m.id) : null;
+                                                            if (synced) {
+                                                                jumpToMessage(synced);
+                                                                await updateThreadMessages();
+                                                            } else {
+                                                                await updateThreadMessages();
+                                                            }
+                                                        } catch (e) {
+                                                            try { toast.error('Échec de la modification.'); } catch (e) {}
+                                                        } finally {
+                                                            setEditingSubmitting(false);
+                                                            setEditingMessageId(null);
+                                                            setEditingText('');
+                                                        }
+                                                    }}>Envoyer</button>
+                                                    <button title="Annuler" className="px-2 py-1 rounded bg-gray-600 text-white" onClick={() => { setEditingMessageId(null); setEditingText(''); }}><FaTimes /></button>
+                                                </div>
+                                            ) : (
+                                                <FaEdit title="Edit" className={`hover:text-white cursor-pointer mx-2`} onClick={async () => {
+                                                    try {
+                                                        if (editingMessageId) {
+                                                            try { toast.error('Un autre message est en cours d\'édition.'); } catch (e) {}
+                                                            return;
+                                                        }
+                                                        setEditingMessageId(m.id ?? null);
+                                                        setEditingText(m.text ?? '');
+                                                    } catch (e) {
+                                                    }
+                                                }} />
+                                            )}
+                                        </>
+                                    )}
+
+                                </div>
+                            </>
                         );
                     })()}
+                    
                 </div>
+
             ))}
             <span aria-hidden="true" style={{ display: 'none' }}>{String(refreshToggle)}</span>
         </div>

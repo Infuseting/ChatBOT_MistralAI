@@ -5,6 +5,7 @@ import { getActualThread, getShareLink, handleMessageSend, Thread, updateServerT
 import { Message } from "../utils/Message";
 import { toast, Bounce } from "react-toastify";
 import { useState, useRef, useEffect } from "react";
+import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/react-dom';
 import { FaPlus, FaMicrophone, FaPaperPlane } from "react-icons/fa";
 import SystemContextModal from "./SystemContextModal";
 import { getActualModel, getAvailableModelList, getFastModelList, setActualModel } from '../utils/Models';
@@ -26,6 +27,14 @@ export default function Chatbot() {
     
     const menuRef = useRef<HTMLDivElement | null>(null);
     const firstItemRef = useRef<HTMLButtonElement | null>(null);
+    // Floating UI for dropdown
+    const { x: dropdownX, y: dropdownY, refs: dropdownRefs, strategy: dropdownStrategy, update: dropdownUpdate } = useFloating({
+        placement: 'bottom-end',
+        middleware: [offset(8), flip(), shift()],
+        whileElementsMounted: autoUpdate,
+    });
+    const dropdownTriggerRef = useRef<HTMLElement | null>(null);
+    const dropdownElRef = useRef<HTMLElement | null>(null);
     const messagesWrapperRef = useRef<HTMLDivElement | null>(null);
     const inputBarRef = useRef<HTMLDivElement | null>(null);
     async function handleShare() {
@@ -209,9 +218,16 @@ export default function Chatbot() {
 
     useEffect(() => {
         function onDocClick(e: MouseEvent) {
-            if (!menuRef.current) return;
-            if (e.target instanceof Node && !menuRef.current.contains(e.target)) {
-                setDropdownMenuOpen(false);
+            try {
+                const target = e.target as Node | null;
+                if (!target) return;
+                const inside = (dropdownTriggerRef.current && dropdownTriggerRef.current.contains(target)) || (dropdownElRef.current && dropdownElRef.current.contains(target)) || (menuRef.current && menuRef.current.contains(target));
+                if (!inside) setDropdownMenuOpen(false);
+            } catch (err) {
+                if (!menuRef.current) return;
+                if (e.target instanceof Node && !menuRef.current.contains(e.target)) {
+                    setDropdownMenuOpen(false);
+                }
             }
         }
         function onEsc(e: KeyboardEvent) {
@@ -290,12 +306,12 @@ export default function Chatbot() {
                 <IoMdShareAlt className="w-6 h-6" />
             </motion.div>
             <div className="relative">
-                <motion.div onClick={() => {handleDropdown(getActualThread())}} className="flex bg-gray-800 p-2 text-white rounded-lg shadow-lg cursor-pointer" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                <motion.div ref={(node) => { try { dropdownRefs.setReference(node as any); dropdownTriggerRef.current = node as HTMLElement | null; } catch {} }} onClick={() => { handleDropdown(getActualThread()); setTimeout(() => dropdownUpdate?.(), 0); }} className="flex bg-gray-800 p-2 text-white rounded-lg shadow-lg cursor-pointer" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                     <IoMdSettings className="w-6 h-6" />
                 </motion.div>
 
                 {dropdownMenuOpen && (
-                    <div ref={menuRef} className="absolute right-0 mt-2 w-48 bg-gray-800 border border-gray-700 rounded-md shadow-lg z-50">
+                    <div ref={(node) => { try { dropdownRefs.setFloating(node as any); dropdownElRef.current = node as HTMLElement | null; } catch {} }} style={{ position: dropdownStrategy as any, left: dropdownX ?? 0, top: dropdownY ?? 0, zIndex: 9999 }} className="w-48 bg-gray-800 border border-gray-700 rounded-md shadow-lg">
                         <div className="relative">
                             <div
                                 className="w-full"

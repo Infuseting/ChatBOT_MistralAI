@@ -8,7 +8,14 @@ export async function POST(request: Request) {
     if (!access_token) return NextResponse.json({ error: 'Missing access_token' }, { status: 400 });
     await prisma.accessToken.deleteMany({ where: { token: access_token } });
     const res = NextResponse.json({ ok: true });
-    res.cookies.set('access_token', '', { httpOnly: true });
+    // Explicitly clear cookie: set empty value and expired date, include path and security attributes
+    res.cookies.set('access_token', '', {
+      httpOnly: true,
+      path: '/',
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      expires: new Date(0),
+    });
     return res;
   } catch (err) {
     console.error('Google token exchange error', err);

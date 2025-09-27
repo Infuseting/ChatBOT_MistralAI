@@ -4,12 +4,12 @@ import { prisma } from '@/lib/prisma';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const id_token = body.id_token as string | undefined;
-    if (!id_token) return NextResponse.json({ error: 'Missing id_token' }, { status: 400 });
+    const access_token = body.access_token as string | undefined;
+    if (!access_token) return NextResponse.json({ error: 'Missing access_token' }, { status: 400 });
 
-    // Verify id_token with Google
-    const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(id_token)}`);
-    if (!verifyRes.ok) return NextResponse.json({ error: 'Invalid id_token' }, { status: 401 });
+    // Verify access_token with Google
+    const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(access_token)}`);
+    if (!verifyRes.ok) return NextResponse.json({ error: 'Invalid access_token' }, { status: 401 });
     const payload = await verifyRes.json();
 
     const sub = payload.sub as string | undefined;

@@ -19,19 +19,29 @@ export async function POST(request: Request) {
 
     if (!sub) return NextResponse.json({ error: 'Invalid token payload' }, { status: 400 });
 
-    // Upsert user
+    // If a user with this email exists but uses a different provider, reject
+    if (email) {
+      const existing = await prisma.user.findUnique({ where: { email } });
+      if (existing && (existing as any).provider && (existing as any).provider !== 'GOOGLE') {
+        return NextResponse.json({ error: 'Account exists with different sign-in method' }, { status: 400 });
+      }
+    }
+
+    // Upsert user by googleId; set provider to google
     const user = await prisma.user.upsert({
       where: { googleId: sub },
       update: {
         name: name ?? undefined,
         email: email ?? undefined,
         avatar: picture ?? undefined,
+        provider: 'GOOGLE',
       },
       create: {
         name: name ?? 'No name',
         email: email ?? undefined,
         avatar: picture ?? undefined,
         googleId: sub,
+  provider: 'GOOGLE',
       },
     });
 

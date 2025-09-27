@@ -181,9 +181,9 @@ High-level endpoints (see `src/app/api`):
 | Responsive Design | ✅ | ✅ | ✅ |
 | Model & Context Configurator | ✅ | ✅ | ✅ |
 | Google OAuth Login | ✅ | ✅ | ✅ |
-| Deep Think Integration | ❌ | ❌ | ❌ |
+| Deep Think Integration | ✅ | ✅ | ✅ |
 | Edit & Regenerate Requests | ✅ | ✅ | ✅ |
-| Email Login | ❌ | ❌ | ❌ |
+| Email Login |  ✅ | ✅ | ✅ |
 | Model Features Viewer | ❌ | ❌ | ❌ |
 | File Input | ❌ | ❌ | ❌ |
 | Audio Call | ❌ | ❌ | ❌ |
@@ -192,6 +192,7 @@ High-level endpoints (see `src/app/api`):
 | Subthread | ❌ | ❌ | ❌ |
 | Web Search | ❌ | ❌ | ❌ |
 | Keybinds | ❌ | ❌ | ❌ |
+| Comments & Docs | ❌ | ❌ | ❌ |
 
 
 ---

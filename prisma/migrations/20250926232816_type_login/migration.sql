@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE `User` ADD COLUMN `provider` ENUM('GOOGLE', 'MDP', 'OTHER') NOT NULL DEFAULT 'OTHER';

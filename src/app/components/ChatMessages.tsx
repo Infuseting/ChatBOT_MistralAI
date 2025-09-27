@@ -66,6 +66,7 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
     const [editingText, setEditingText] = useState<string>('');
     const [editingSubmitting, setEditingSubmitting] = useState<boolean>(false);
+    const [openThinkingFor, setOpenThinkingFor] = useState<string | null>(null);
     const editingTextareaRef = useRef<HTMLTextAreaElement | null>(null);
     const resizeEditingTextarea = () => {
         try {
@@ -528,6 +529,19 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
             {branchWithKeys.map(({ m, key }, i) => (
                 <div ref={i === branchWithKeys.length - 1 ? undefined : undefined} data-msg-id={key} key={key} className={`${i === 0 ? 'mt-[15%]' : i === branchWithKeys.length - 1 ? '2xl:mb-[10%] xl:mb-[10%] lg:mb-[10%] md:mb-[10%] sm:mb-[35%] mb-[40%]' : ''} ${m.sender === 'assistant' ? "max-w-[100%] min-w-[100%]" : "max-w-[80%] min-w-[80%] text-end"} p-3 rounded-md ${m.sender === 'user' ? 'self-end text-white' : 'self-star text-white'}`}>
                     <div className={`text-lg ${m.sender === 'user' ? 'bg-indigo-600 p-2 rounded-md' : ''}`}>
+                        {m.sender === 'assistant' && (m.thinking && m.thinking.length > 0) && (
+                                    <div className="mt-2">
+                                        <button className="text-sm text-gray-400 hover:text-white underline" onClick={() => setOpenThinkingFor(prev => prev === m.id ? null : m.id)}>
+                                            {openThinkingFor === m.id ? 'Hide thinking' : 'See thinking'}
+                                        </button>
+                                        {openThinkingFor === m.id && (
+                                            <div className="mt-2 pl-4 border-l-2 border-gray-600 text-gray-300">
+                                                {/* Render thinking as pre-wrapped text to preserve formatting */}
+                                                <div className="whitespace-pre-wrap">{m.thinking}</div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                         {m.sender === 'assistant' ? parseMarkdown(m.text) : (
                             editingMessageId === m.id ? (
                                 <textarea ref={editingTextareaRef} rows={1} value={editingText} onChange={(e) => { setEditingText(e.target.value); resizeEditingTextarea(); }} onKeyDown={async (ev) => {
@@ -580,6 +594,7 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
                                 {m.sender === 'assistant' && (
                                     <hr className="my-2 border-t border-gray-600" />
                                 )}
+                            
                                 <div className={`mt-2 flex items-center ${m.sender === 'assistant' ? 'justify-start flex-row' : 'justify-start flex-row-reverse'} text-sm text-gray-400`}>
                                     {editingMessageId !== m.id && (
                                         <>

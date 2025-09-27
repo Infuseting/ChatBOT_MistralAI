@@ -448,7 +448,37 @@ export function updateAllThreadsList(updated: Thread) {
     updateActualThread();    
 }
 
+function extractThinkingAndText(response : any) {
+  const thinking : string[] = [];
+  const texts : string[] = [];
 
+  if (!response || !Array.isArray(response.choices)) return { thinking, texts };
+
+  for (const choice of response.choices) {
+    const msg = choice.message;
+    if (!msg) continue;
+
+    const content = msg.content;
+    if (Array.isArray(content)) {
+      for (const item of content) {
+        if (item.thinking && Array.isArray(item.thinking)) {
+          for (const t of item.thinking) {
+            if (t && typeof t.text === 'string') thinking.push(t.text);
+          }
+        }
+        if (item.text && typeof item.text === 'string') texts.push(item.text);
+      }
+    } else if (typeof content === 'string') {
+      texts.push(content);
+    } else if (content && typeof content === 'object') {
+      // handle object mapping
+      if (content.thinking) thinking.push(content.thinking);
+      if (content.text) texts.push(content.text);
+    }
+  }
+
+  return { thinking, texts };
+}
 export async function handleMessageSend(thread: Thread, content: string) {
     const lastMessage = getLastMessage(thread);
     const history = getHistory(thread, lastMessage);
@@ -495,29 +525,9 @@ export async function handleMessageSend(thread: Thread, content: string) {
         newMessage.thinking = "";
         return;
     }
-    const choice = chatResponse.choices[0];
-    let finalText = "";
-    const msgContent: unknown = choice?.message?.content ?? "";
-    if (Array.isArray(msgContent)) {
-        finalText = (msgContent as Array<{ type?: string; text?: string }>)
-            .filter((block) => block?.type === "text")
-            .map((block) => block?.text ?? "")
-            .join("\n");
-    } else if (typeof msgContent === "string") {
-        finalText = msgContent;
-    }
-    let reasoning = "";
-    const thinkingField: unknown = (choice as any)?.thinking ?? "";
-    if (Array.isArray(thinkingField)) {
-        reasoning = (thinkingField as Array<{ type?: string; thinking?: string }>)
-            .filter((block) => block?.type === "thinking")
-            .map((block) => block?.thinking ?? "")
-            .join("\n");
-    } else if (typeof thinkingField === "string") {
-        reasoning = thinkingField;
-    }
-    newMessage.text = finalText;
-    newMessage.thinking = reasoning;
+    const { thinking, texts } = extractThinkingAndText(chatResponse);
+    newMessage.text = texts.join('\n');
+    newMessage.thinking = thinking.join('\n');
     updateActualThread();
     if ((thread.status as any) !== 'remote') {
         await createServerThread(thread);
@@ -567,32 +577,9 @@ export async function handleRegenerateMessage(thread : Thread, message: Message,
         newMessage.thinking = "";
         return;
     }
-    const choice = chatResponse.choices[0];
-    console.log('Regenerate choice', choice);
-    let finalText = "";
-    const msgContent: unknown = choice?.message?.content ?? "";
-    if (Array.isArray(msgContent)) {
-        finalText = (msgContent as Array<{ type?: string; text?: string }>)
-            .filter((block) => block?.type === "text")
-            .map((block) => block?.text ?? "")
-            .join("\n");
-    }
-    else if (typeof msgContent === "string") {
-        finalText = msgContent;
-    }
-    let reasoning = "";
-    const thinkingField: unknown = (choice as any)?.thinking ?? "";
-    if (Array.isArray(thinkingField)) {
-        reasoning = (thinkingField as Array<{ type?: string; thinking?: string }>)
-            .filter((block) => block?.type === "thinking")
-            .map((block) => block?.thinking ?? "")
-            .join("\n");
-    }
-    else if (typeof thinkingField === "string") {
-        reasoning = thinkingField;
-    }
-    newMessage.text = finalText;
-    newMessage.thinking = reasoning;
+    const { thinking, texts } = extractThinkingAndText(chatResponse);
+    newMessage.text = texts.join('\n');
+    newMessage.thinking = thinking.join('\n');
     updateActualThread();
     if ((thread.status as any) !== 'remote') {
         await createServerThread(thread);
@@ -656,29 +643,10 @@ export async function handleEditMessage(thread : Thread, message: Message, editM
         return;
     }
     const choice = chatResponse.choices[0];
-    let finalText = "";
-    const msgContent: unknown = choice?.message?.content ?? "";
-    if (Array.isArray(msgContent)) {
-        finalText = (msgContent as Array<{ type?: string; text?: string }>)
-            .filter((block) => block?.type === "text")
-            .map((block) => block?.text ?? "")
-            .join("\n");
-    } else if (typeof msgContent === "string") {
-        finalText = msgContent;
-    }
-    let reasoning = "";
-    const thinkingField: unknown = (choice as any)?.thinking ?? "";
-    if (Array.isArray(thinkingField)) {
-        reasoning = (thinkingField as Array<{ type?: string; thinking?: string }>)
-            .filter((block) => block?.type === "thinking")
-            .map((block) => block?.thinking ?? "")
-            .join("\n");
-    }
-    else if (typeof thinkingField === "string") {
-        reasoning = thinkingField;
-    }
-    newMessage.text = finalText;
-    newMessage.thinking = reasoning;
+    const { thinking, texts } = extractThinkingAndText(choice);
+    newMessage.text = texts.join('\n');
+    newMessage.thinking = thinking.join('\n');
+
     updateActualThread();
     if ((thread.status as any) !== 'remote') {
         await createServerThread(thread);

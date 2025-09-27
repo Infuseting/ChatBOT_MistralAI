@@ -12,11 +12,19 @@ enum Sender {
   assistant
 }
 
+enum AuthProvider {
+  GOOGLE
+  MDP
+  OTHER
+}
+
 model User {
   id        String   @id @default(uuid())
   name      String   @db.LongText
+  password  String?  @db.LongText
   email     String?  @unique
   googleId  String?  @unique
+  provider  AuthProvider @default(OTHER)
   avatar    String?  @db.LongText
   createdAt DateTime @default(now())
 

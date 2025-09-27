@@ -89,6 +89,22 @@ export default function ModeleSettings() {
                                     >
                                         <h1 className="text-lg">{model.id}</h1>
                                         <p className="text-sm">{model.description}</p>
+                                        <div className=''>
+                                            {
+                                                Object.entries(model.capabilities).map(([cap, val]) => {
+                                                    if (!val) return null;
+                                                    return (
+                                                        <span
+                                                            key={`${model.id}-cap-${cap}`}
+                                                            className="inline-block bg-gray-600 text-xs text-white rounded-full px-2 py-1 mr-2 mb-2"
+                                                        >
+                                                            {cap.replaceAll('fine_tuning', 'thinking').replaceAll('_', ' ')}
+                                                        </span>
+                                                    )
+                                                })
+                                            }
+                                        </div>
+                                        <p></p>
                                     </div>
                                 </li>
                             ))

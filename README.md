@@ -191,7 +191,7 @@ High-level endpoints (see `src/app/api`):
 | Video Call | ❌ | ❌ | ❌ |
 | Access without login | ❌ | ❌ | ❌ |
 | Subthread | ❌ | ❌ | ❌ |
-| Web Search | ❌ | ❌ | ❌ |
+| Web Search | ✅ | ✅ | ✅ |
 | Keybinds | ❌ | ❌ | ❌ |
 | Comments & Docs | ❌ | ❌ | ❌ |
 

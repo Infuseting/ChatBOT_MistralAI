@@ -14,24 +14,17 @@ const defaultThreadName = "New Thread";
 const allThreads : Thread[] = [];
 let loadingThreadsPromise: Promise<Thread[]> | null = null;
 function generateUUID() {
+    // Generate a UUID using the platform crypto API when available.
     if (typeof globalThis !== 'undefined' && (globalThis as any).crypto && typeof (globalThis as any).crypto.randomUUID === 'function') {
         return (globalThis as any).crypto.randomUUID();
     }
 }
-
-async function readFileAsDataURL(file: File): Promise<string> {
-    return await new Promise((resolve, reject) => {
-        try {
-            const reader = new FileReader();
-            reader.onerror = () => { reject(new Error('Failed to read file')); };
-            reader.onload = () => { resolve(String(reader.result)); };
-            reader.readAsDataURL(file);
-        } catch (e) {
-            reject(e);
-        }
-    });
-}
    
+/**
+ * Check whether a thread id exists in local storage cache.
+ * @param id - thread identifier to check
+ * @returns true if the id is present in the thread ids cache, false otherwise
+ */
 export function threadExists(id: string) : boolean {
     try {
         if (typeof window === 'undefined' || !window.localStorage) return false;
@@ -49,6 +42,12 @@ export function threadExists(id: string) : boolean {
     }
 }
 
+/**
+ * Read a lightweight marker that indicates which thread is currently open.
+ * The marker is stored in localStorage under `openThreadMarker` and has
+ * shape { id, path } when present.
+ * @returns the parsed marker object or null if not present/invalid
+ */
 export function readOpenThreadMarker(): { id: string; path: string } | null {
     try {
         if (typeof window === 'undefined' || !window.localStorage) return null;
@@ -61,6 +60,11 @@ export function readOpenThreadMarker(): { id: string; path: string } | null {
         return null;
     }
 }
+/**
+ * Select a thread by id. If found in persisted storage, set it as the
+ * actual (active) thread.
+ * @param id - id of the thread to select
+ */
 export async function selectThreadById(id:string) {
     // prefer reading from persisted storage for sync selection
     const t = (await getThreads()).find(th => th.id === id) ?? null;
@@ -69,6 +73,13 @@ export async function selectThreadById(id:string) {
 
 // Try to find a thread in the current provider by id
 // thread cache helpers - read/write synchronously from localStorage
+/**
+ * Read the thread cache from localStorage. When called without parameters
+ * returns an array of threads; when called with an id returns a single thread
+ * or null if not found.
+ * @param id - optional id to retrieve a single thread
+ * @returns Thread[] when no id is provided, Thread|null when id provided
+ */
 export function readThreadCache(): Thread[];
 export function readThreadCache(id: string): Thread | null;
 export function readThreadCache(id?: string): Thread[] | Thread | null {
@@ -94,6 +105,11 @@ export function readThreadCache(id?: string): Thread[] | Thread | null {
         return id ? null : [];
     }
 }
+/**
+ * Persist the list of threads to localStorage and update an index of ids.
+ * This is a synchronous helper and swallows errors for safety.
+ * @param list - array of Thread objects to persist
+ */
 export function setThreadCache(list: Thread[]) {
     try {
         if (typeof window === 'undefined' || !window.localStorage) return;
@@ -104,6 +120,12 @@ export function setThreadCache(list: Thread[]) {
         } catch (e) {}
     } catch (e) {}
 }
+/**
+ * Find a thread by id within the currently known threads. This will call
+ * `getThreads()` which may perform an API fetch.
+ * @param id - thread id to find
+ * @returns a Thread object or null if not found
+ */
 export async function findThreadById(id: string) : Promise<Thread | null> {
     try {
         const threads = await getThreads();
@@ -114,6 +136,12 @@ export async function findThreadById(id: string) : Promise<Thread | null> {
 }
 
 // Open a thread if found, otherwise create a new local thread and assign the provided id
+/**
+ * Open an existing thread by id or create a new local thread using the
+ * provided id when none exists. The created thread is persisted to cache.
+ * @param id - id to open or use for the new thread
+ * @returns the opened or newly created Thread
+ */
 export async function openOrCreateThreadWithId(id: string) : Promise<Thread> {
     const existing = await findThreadById(id);
     if (existing) {
@@ -141,6 +169,13 @@ export async function openOrCreateThreadWithId(id: string) : Promise<Thread> {
 }
 
 // For share links we just try to open if exists; otherwise create a placeholder and mark as remote
+/**
+ * Attempt to open a shared (remote) thread identified by the share code.
+ * If the API returns data the thread is created locally as status 'remote'.
+ * Otherwise a placeholder remote thread is created.
+ * @param id - share code / id representing the shared thread
+ * @returns the resulting Thread
+ */
 export async function openSharedThread(id: string) : Promise<Thread> {
     const existing = await findThreadById(id);
     if (existing) {
@@ -218,6 +253,11 @@ export async function openSharedThread(id: string) : Promise<Thread> {
     setActualThread(thread);
     return thread;
 }
+/**
+ * Create a new local thread with a generated UUID and default context/model.
+ * The newly created thread becomes the active thread and is stored in cache.
+ * @returns the created Thread
+ */
 export function newThread() {
     const thread: Thread = {
         id: generateUUID(),
@@ -242,6 +282,11 @@ export function newThread() {
     return thread;
 }
 
+/**
+ * Set the current active thread globally and dispatch a DOM event
+ * (`actualThreadUpdated`) so UI components can react.
+ * @param thread - Thread or null to clear
+ */
 export function setActualThread(thread: Thread | null) {
     if ((globalThis as any).actualThread) {
         const prev : Thread = (globalThis as any).actualThread;
@@ -263,6 +308,12 @@ export function setActualThread(thread: Thread | null) {
     
     }
 }
+/**
+ * Reload threads from the remote API endpoint `/api/thread` and normalize
+ * the returned structure into the local Thread shape. Returns an array of
+ * Thread objects or an empty array on failure.
+ * @returns Promise<Thread[]>
+ */
 export async function reloadThread() {
     try {
         try {
@@ -335,6 +386,12 @@ export async function reloadThread() {
         return [];
     }
 }
+/**
+ * Get the current list of threads. This function caches results in memory
+ * and only fetches from the server once per session by using
+ * `loadingThreadsPromise`.
+ * @returns Promise resolving to an array of Thread objects
+ */
 export async function getThreads(): Promise<Thread[]> {
     if (allThreads.length > 0) return allThreads;
     if (loadingThreadsPromise) {
@@ -369,6 +426,12 @@ export async function getThreads(): Promise<Thread[]> {
     return allThreads;
 }
 
+/**
+ * Request a share link for a remote thread from the server API. Returns a
+ * URL string on success or null on failure.
+ * @param thread - Thread to generate a share link for
+ * @returns share URL or null
+ */
 export async function getShareLink(thread: Thread) : Promise<string | null | void> {
     const result = await fetch('/api/thread', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'share', idThread: thread.id }) })
         .catch((e) => {
@@ -390,6 +453,11 @@ export async function getShareLink(thread: Thread) : Promise<string | null | voi
     return `${window.location.origin}/s/${code}`;
 }
 
+/**
+ * Get the active thread that was previously set via `setActualThread`.
+ * Ensures the returned thread has a model assigned.
+ * @returns Thread or null
+ */
 export function getActualThread() : Thread | null {
     const thread = (globalThis as any).actualThread ?? null;
     if (thread) {

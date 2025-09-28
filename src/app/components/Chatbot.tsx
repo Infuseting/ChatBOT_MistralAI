@@ -6,7 +6,7 @@ import { Message } from "../utils/Message";
 import { showErrorToast, showSuccessToast } from "../utils/toast";
 import { useState, useRef, useEffect } from "react";
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/react-dom';
-import { FaPlus, FaMicrophone, FaPaperPlane } from "react-icons/fa";
+import { FaPaperPlane } from "react-icons/fa";
 import SystemContextModal from "./SystemContextModal";
 import { getActualModel, getAvailableModelList, getFastModelList, setActualModel } from '../utils/Models';
 import ChatMessages from "./ChatMessages";
@@ -14,18 +14,23 @@ import ChatInput from './ChatInput';
 
 
 export default function Chatbot() {
-    const [dropdownMenuOpen, setDropdownMenuOpen] = useState(false);
-    const [modelPanelOpen, setModelPanelOpen] = useState(false);
-    const [contextModalOpen, setContextModalOpen] = useState(false);
-    // toggle to force an invisible re-render when needed
+    // UI state
+    const [dropdownMenuOpen, setDropdownMenuOpen] = useState(false); // settings dropdown
+    const [modelPanelOpen, setModelPanelOpen] = useState(false); // nested model selector
+    const [contextModalOpen, setContextModalOpen] = useState(false); // system context modal
+    // toggle used to force an invisible re-render when needed by React
     const [refreshToggle, setRefreshToggle] = useState(false);
+    // currently selected model and known fast model list
     const [actualModel, setActualModelState] = useState<string | null>(null);
     const [models, setModels] = useState<string[]>([]);
+    // currently active thread (conversation)
     const [actualThread, setActualThread] = useState<Thread | null>(getActualThread());
+    // whether the UI is showing the newest branch of the conversation (controls input)
     const [isNewestBranch, setisNewestBranch] = useState<boolean>(true);
+    // whether the current thread is a shared thread (read-only behavior)
     const [isShareThread, setIsShareThread] = useState<boolean>(actualThread?.share ?? false);
-    
-    
+
+    // refs used for keyboard/focus and positioning
     const menuRef = useRef<HTMLDivElement | null>(null);
     const firstItemRef = useRef<HTMLButtonElement | null>(null);
     // Floating UI for dropdown
@@ -39,10 +44,12 @@ export default function Chatbot() {
     const messagesWrapperRef = useRef<HTMLDivElement | null>(null);
     const inputBarRef = useRef<HTMLDivElement | null>(null);
     async function handleShare() {
-    if (isShareThread) {
-        showErrorToast('You cannot share a shared thread.');
-        return;
-    }
+        // Share the current thread by requesting a share link from the server
+        // If the thread is already marked as shared, sharing is disabled.
+        if (isShareThread) {
+            showErrorToast('You cannot share a shared thread.');
+            return;
+        }
     try {
         console.log(actualThread);
         if (actualThread?.status === 'remote') {
@@ -66,8 +73,8 @@ export default function Chatbot() {
     }
 }
     function handleDropdown(thread : Thread | null) {
-            // Toggle an invisible state to force a re-render when needed.
-            // This state does not affect visible UI directly.
+            // Toggle the settings dropdown. If no thread is open, show an error.
+            // Additionally flip `refreshToggle` to force a React re-render when necessary.
             if (!thread) {
                 showErrorToast('Aucun thread ouvert');
                 return;
@@ -95,9 +102,10 @@ export default function Chatbot() {
             try {
                 const t = (e as CustomEvent).detail as Thread | null;
 
-                // 🔹 On clone le thread pour forcer React à voir un changement
+                // clone the thread and its messages to ensure React detects the update
                 setActualThread(t ? { ...t, messages: [...(t.messages ?? [])] } : null);
 
+                // update local share flag
                 setIsShareThread(t?.share ?? false);
             } catch (err) {
                 const current = getActualThread();
@@ -122,7 +130,8 @@ export default function Chatbot() {
     
 
     function handleSelectModel(model: string) {
-        
+        // Select a model from the model list. If a thread exists, apply to thread
+        // and attempt to update the server; otherwise update the global actual model.
          showSuccessToast(`Model "${model}" selected`);
         setModelPanelOpen(false);
         const thread = actualThread;
@@ -136,7 +145,7 @@ export default function Chatbot() {
         }
         setDropdownMenuOpen(false);
     }
-
+    // Close dropdown when clicking outside or pressing Escape
     useEffect(() => {
         function onDocClick(e: MouseEvent) {
             try {
@@ -161,7 +170,7 @@ export default function Chatbot() {
             document.removeEventListener('keydown', onEsc);
         };
     }, []);
-
+    // If the dropdown is open and the thread is shared, close the dropdown
     useEffect(() => {
         if (dropdownMenuOpen && getActualThread()?.share) {
             showErrorToast('You cannot modify parameter of shared thread.');
@@ -172,6 +181,8 @@ export default function Chatbot() {
         }
     }, [dropdownMenuOpen]);
 
+
+    // Floating input bar positioning logic
     useEffect(() => {
         function updatePosition() {
             const parent = messagesWrapperRef.current;
@@ -257,6 +268,7 @@ export default function Chatbot() {
                     </div>
                 )}
             </div>
+            {/* System context modal: opens when user chooses to modify system prompt/context */}
             {contextModalOpen && <SystemContextModal onClose={() => setContextModalOpen(false)} />}
 
         </div>
@@ -264,6 +276,11 @@ export default function Chatbot() {
         <span aria-hidden="true" style={{ display: 'none' }}>{String(refreshToggle)}</span>
     
         {  
+            /* Rendering branches:
+               - If no thread selected: show placeholder text
+               - If selected thread has messages: show messages list and floating input
+               - Otherwise: show welcome with empty-thread input
+            */
             actualThread === null ? (
                 <div className="mx-auto max-w-80 h-full flex items-center justify-center">
                     <p className="text-gray-300 text-lg text-center">No thread selected. Please create or select a thread to start chatting.</p>
@@ -274,6 +291,7 @@ export default function Chatbot() {
                     {/* Centered fixed input bar */}
                     <div ref={inputBarRef} className="fixed bottom-0 transform -translate-x-1/2 pb-4 bg-gray-700 pointer-events-auto mx-auto w-[calc(100%_-_2.5rem)] 2xl:max-w-6xl xl:max-w-4xl lg:max-w-3xl md:max-w-2xl sm:max-w-lg max-w-80 max-h-90" style={{ left: '50%' }}>
                         <div className="flex items-center space-x-2 p-4 bg-gray-800 rounded-md shadow-lg ">
+                            {/* ChatInput: controlled by parent for thread/context and uses handleMessageSend to perform send */}
                             <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} />
                         </div>
                     </div>
@@ -283,6 +301,7 @@ export default function Chatbot() {
                     <h1 className="mx-20 text-white 2xl:text-6xl xl:text-5xl lg:text-4xl md:text-3xl sm:text-lg text-lg text-center">Hello. How can I assist you today?</h1>
                     <div className="w-[calc(100%_-_2.5rem)] 2xl:max-w-6xl xl:max-w-4xl lg:max-w-3xl md:max-w-2xl sm:max-w-lg max-w-80 max-h-90 rounded-md p-4 mx-auto bg-gray-800">
                         <div className="flex flex-1 items-center">
+                            {/* Empty-thread input: still uses ChatInput but with empty thread (will error if sent) */}
                             <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} />
                         </div>
                     </div>

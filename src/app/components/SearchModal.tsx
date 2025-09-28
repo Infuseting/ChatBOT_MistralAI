@@ -8,16 +8,20 @@ import { ensureDate } from '../utils/DateUTC';
 import ConversationsList from './ThreadsList';
 const MotionFaTimes = motion(FaTimes);
 
+/**
+ * SearchModal
+ *
+ * Modal that lets the user search for existing threads. Delegates thread
+ * loading to `ConversationsList` and forwards `query` to it.
+ */
 export default function SearchModal({ onClose }: { onClose: () => void }) {
     const [query, setQuery] = useState('');
     // ConversationsList will load threads internally; just pass the query
 
     function handleThreadClick(t: any) {
             try {
-                const actual = getActualThread();
-                const msg = `click thread actual=${actual?.id ?? 'null'} thread=${t?.id ?? 'unknown'}`;
-                try { console.log(msg, actual, t); } catch {}
-        
+                // open the selected thread; if the app is showing a shared
+                // thread we navigate the browser to the shared URL instead.
             } catch (e) {
             }
             try {

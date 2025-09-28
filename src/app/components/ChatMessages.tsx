@@ -8,6 +8,14 @@ import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/react
 import { showErrorToast, showSuccessToast } from "../utils/toast";
 
 
+/**
+ * ChatMessages component
+ * Renders a linearized view of a conversation branch for a given `thread`.
+ * Props:
+ * - thread: the Thread object to render
+ * - onNewestBranchChange: optional callback called with true/false when the
+ *   currently selected branch becomes the newest branch or not
+ */
 export default function ChatMessages({ thread, onNewestBranchChange }: { thread: Thread, onNewestBranchChange?: (v: boolean) => void }) {
     const [messages, setMessages] = useState<Message[]>(thread.messages ?? []);
     const rootRef = useRef<HTMLDivElement | null>(null);

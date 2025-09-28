@@ -7,6 +7,16 @@ import { useEffect, useState } from 'react';
 const MotionFaTimes = motion(FaTimes);
 
 
+/**
+ * SystemContextModal
+ *
+ * Modal that lets the user edit the system/context prompt associated with the
+ * currently active thread. The context is saved back to the server via
+ * `updateServerThread` and the modal is closed.
+ *
+ * Props:
+ * - onClose(): callback invoked when the modal should be closed
+ */
 export default function SystemContextModal({ onClose }: { onClose: () => void }) {
     const [text, setText] = useState<string>('');
 

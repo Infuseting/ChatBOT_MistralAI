@@ -1,5 +1,16 @@
 import { getContext, setContext } from "../utils/Context";
 import { useState, useEffect } from "react";
+
+/**
+ * ContextSettings
+ *
+ * Panel to edit the global/system context used by the assistant. The control
+ * reads the current context using `getContext()` on mount and persists
+ * changes immediately using `setContext()` when the textarea value changes.
+ *
+ * Note: `saveContext` accepts an optional value; when omitted it will persist
+ * the locally stored `text` state.
+ */
 export default function ContextSettings() {
     const [text, setText] = useState<string>('');
     

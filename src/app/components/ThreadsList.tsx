@@ -6,6 +6,23 @@ import React from 'react';
 import { useEffect, useState } from 'react';
 import { getThreads, reloadThread, setActualThread, getActualThread } from '../utils/Thread';
 
+/**
+ * ThreadsList
+ *
+ * Renders a list of conversation threads grouped by recency (last day, week, month, older).
+ * The component listens for global events that notify when the active thread or the
+ * thread list is updated and reloads the list accordingly.
+ *
+ * Props:
+ * - threads?: optional array of thread objects to display (if omitted the component will load threads itself)
+ * - onThreadClick?: optional click handler when a thread is selected
+ * - activeThreadId?: optional currently active thread id (overrides internal tracking)
+ * - showDate?: whether to show the thread date under the name
+ * - query?: optional search query to filter thread names (case-insensitive)
+ *
+ * Each thread object is expected to include at least: { id: string, name?: string, date?: string | Date }
+ */
+
 export default function ThreadsList({
     threads,
     onThreadClick,

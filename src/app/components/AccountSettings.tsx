@@ -1,6 +1,15 @@
-import { useEffect } from 'react';
 import { deleteAccount } from '../utils/Account';
 import { useRouter } from 'next/navigation';
+
+/**
+ * AccountSettings
+ *
+ * Simple settings panel for account-related actions. Currently exposes a
+ * destructive "delete account" button which calls `deleteAccount()` from
+ * `src/app/utils/Account` and then redirects the user to the login page when
+ * successful.
+ *
+ */
 export default function AccountSettings() {
     const router = useRouter();
     return (

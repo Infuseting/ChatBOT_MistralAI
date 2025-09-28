@@ -10,10 +10,23 @@ import UserSettingsModal from "./UserSettingsModal";
 import SearchModal from "./SearchModal";
 import { setActualThread } from "../utils/Thread";
 import { motion } from "motion/react";
-import { getThreads, newThread, reloadThread } from '../utils/Thread';
+import { newThread, getActualThread } from '../utils/Thread';
 import { ensureDate } from '../utils/DateUTC';
-import { getActualThread } from '../utils/Thread';
 import ConversationsList from './ThreadsList';
+
+/**
+ * Navbar
+ *
+ * Top-left navigation panel used by the application. It is responsible for:
+ * - starting a new thread
+ * - toggling the sidebar collapse/expand
+ * - opening the search and user settings modals
+ * - rendering the ConversationsList (threads)
+ *
+ * The component performs a lightweight user fetch on mount and keeps some
+ * transient UI state locally. It intentionally avoids loading threads itself
+ * (that responsibility is delegated to the ConversationsList component).
+ */
 export default function Navbar() {
     const [menuOpen, setMenuOpen] = useState(false);
     const [navbarOpen, setNavbarOpen] = useState(true);
@@ -21,7 +34,6 @@ export default function Navbar() {
     const [user, setUser] = useState<{ id: string; name: string; picture?: string } | null | undefined>(undefined);
     const router = useRouter();
     const waitingForOpenRef = useRef(false);
-    const detailsRef = useRef<HTMLDetailsElement | null>(null);
     // Floating UI for user menu
     const { x: userMenuX, y: userMenuY, refs: userMenuRefs, strategy: userMenuStrategy, update: userMenuUpdate } = useFloating({
         placement: 'top-start',
@@ -48,13 +60,7 @@ export default function Navbar() {
     }
     
     function handleThreadClick(t: any) {
-        try {
-            const actual = getActualThread();
-            const msg = `click thread actual=${actual?.id ?? 'null'} thread=${t?.id ?? 'unknown'}`;
-            try { console.log(msg, actual, t); } catch {}
-        
-        } catch (e) {
-        }
+        // No-op logging removed; the handler simply opens/activates the selected thread.
         try {
             if (getActualThread()?.share) {
                 window.location.href = `${window.location.origin}/${t.id}`;

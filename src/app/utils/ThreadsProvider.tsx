@@ -13,6 +13,20 @@ type ThreadsContextValue = {
 const ThreadsContext = createContext<ThreadsContextValue | undefined>(undefined);
 
 
+/**
+ * ThreadsProvider
+ * React Context provider that exposes a list of threads and helpers to reload
+ * them from the backend. It also persists threads into localStorage so the
+ * UI can restore state across reloads.
+ *
+ * Provided context value shape:
+ * {
+ *   threads: Thread[];
+ *   setThreads: (t: Thread[]) => void;
+ *   reloadThreads: () => Promise<void>;
+ *   loading: boolean;
+ * }
+ */
 export function ThreadsProvider({ children }: { children: React.ReactNode }) {
   const [threads, setThreads] = useState<Thread[]>(() => {
     try {

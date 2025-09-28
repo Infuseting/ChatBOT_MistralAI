@@ -3,7 +3,14 @@ import React, { useEffect, useRef, useId, useState } from 'react';
 import { FaPlus, FaMicrophone, FaPaperPlane } from 'react-icons/fa';
 import { showErrorToast, showSuccessToast } from "../utils/toast";
 import { Thread } from '../utils/Thread';
+import { FaTimes } from 'react-icons/fa';
 
+// ChatInput props:
+// - actualThread: currently active Thread or null
+// - isNewestBranch: whether the user can type/send (controls read-only state)
+// - isShareThread: if true, the input is disabled because the thread is shared
+// - handleMessageSend: function to call to send the message. Signature:
+//     (thread: Thread, value: string, files?: File[]) => Promise<void> | void
 type Props = {
     actualThread: Thread | null;
     isNewestBranch: boolean;
@@ -23,7 +30,7 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
 
     const MAX_FILES = 10;
     const MAX_SIZE = 8 * 1024 * 1024; // 8 MB
-
+    // adjust textarea height on input
     useEffect(() => {
         // safety: ensure initial height is correct
         const el = textareaRef.current;
@@ -31,13 +38,13 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
         el.style.height = 'auto';
         el.style.height = `${el.scrollHeight}px`;
     }, []);
-
+    // adjust textarea height on input
     function onInput(e: React.FormEvent<HTMLTextAreaElement>) {
         const el = e.currentTarget as HTMLTextAreaElement;
         el.style.height = 'auto';
         el.style.height = `${el.scrollHeight}px`;
     }
-
+    // handle Enter key (without Shift) to send message
     async function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -61,7 +68,7 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
             el.style.height = `${el.scrollHeight}px`;
         }
     }
-
+    // Handle send button click
     async function onSendClick() {
         if (!isNewestBranch) return;
         const value = textareaRef.current?.value || "";
@@ -83,7 +90,7 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
         await handleMessageSend(actualThread, value, files.map(sf => sf.file));
         // clear selected files after sending
     }
-
+    // Handle file input change
     function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
         const fileList = e.currentTarget.files;
         if (!fileList) return;
@@ -126,12 +133,12 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
         setErrorMessage(null);
         e.currentTarget.value = '';
     }
-
+    // Handle microphone button click (stub)
     function onMicClick() {
         if (!isNewestBranch) return;
         console.log('Microphone pressed');
     }
-
+    // Remove a selected file by index
     function removeFile(index: number) {
         setSelectedFiles(prev => {
             const toRemove = prev[index];
@@ -139,7 +146,7 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
             return prev.filter((_, i) => i !== index);
         });
     }
-
+    // Format bytes as human-readable text
     function formatBytes(bytes: number) {
         if (bytes === 0) return '0 B';
         const k = 1024;
@@ -147,7 +154,7 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
-
+    // Get icon URL for a file based on its type/extension
     function getFileIcon(file: File) {
         const ext = (file.name.split('.').pop() || '').toLowerCase();
         const mime = (file.type || '').toLowerCase();
@@ -208,6 +215,8 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
                             const src = sf.previewUrl ? sf.previewUrl : getFileIcon(file);
                             return (
                                 <div key={index} className="flex items-center flex-col bg-gray-700 text-white px-3 py-1 rounded-md min-w-48 max-w-48">
+                                    <FaTimes className="self-end cursor-pointer hover:text-red-500" onClick={() => removeFile(index)} />
+                                    <hr className='w-full border-gray-600 my-1' />
                                     <img
                                         src={src}
                                         alt={file.name}

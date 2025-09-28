@@ -1,5 +1,11 @@
 import { getApiKey } from "./ApiKey";
 
+// Helpers to manage available and "fast" model lists. These functions read
+// and write model preferences to localStorage and provide fallbacks when
+// running in non-browser environments.
+
+// Fetch a list of available models from the remote Mistral API. Returns an
+// array (possibly empty) on success or an empty array on any failure.
 export async function getAvailableModelList() {
     const apiKey = getApiKey();
     try {
@@ -27,6 +33,9 @@ export async function getAvailableModelList() {
     }
 }
 
+// Return a small list of models considered "fast" or preferred for quick
+// selection. This reads `fastModelList` from localStorage when available and
+// falls back to a default list.
 export function getFastModelList(): string[] {
     try {
         if (typeof window === 'undefined' || !window.localStorage) {
@@ -40,6 +49,9 @@ export function getFastModelList(): string[] {
         return ['mistral-large-latest', 'mistral-medium-2505'];
     }
 }
+// Persist a short list of models to localStorage and notify other parts of
+// the UI via a CustomEvent (`fastModelListUpdated`). Also ensures
+// `actualModel` stays valid and points to a known model.
 export function setFastModelList(modelList: string[]) {
     try {
         if (typeof window === 'undefined' || !window.localStorage) return;

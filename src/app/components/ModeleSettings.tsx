@@ -4,6 +4,19 @@ import { useEffect } from 'react';
 import { getApiKey, setApiKey, isValidApiKey } from '../utils/ApiKey';
 import { getAvailableModelList, getFastModelList, toggleFastModel, isFastModel, getActualModel, setActualModel } from '../utils/Models';
 import { useState } from 'react';
+
+/**
+ * ModeleSettings
+ *
+ * Settings panel for model/API-key configuration. Responsibilities:
+ * - show and update the Mistral API key (persisted by `setApiKey`)
+ * - display available models for the provided API key
+ * - allow quick-selection of a "fast" model and toggle models in the fast list
+ *
+ * This component initializes by reading the saved API key and fast model list
+ * from localStorage, validates the key (via `isValidApiKey`) and fetches the
+ * available model list when the key is valid.
+ */
 export default function ModeleSettings() {
     const [apiKey, setApiKeyState] = useState('');
     const [isApiKeyValid, setIsApiKeyValid] = useState<"true" | "false" | undefined>(undefined);

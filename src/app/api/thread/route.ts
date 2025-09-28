@@ -2,12 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { ensureDate } from '@/app/utils/DateUTC';
 
+/**
+ * Small helper: generate a UUID string.
+ *
+ * Uses the platform crypto.randomUUID when available; otherwise falls back
+ * to a RFC4122 v4-like pseudo-random implementation.
+ */
 function generateUUID(): string {
-  // Prefer the platform crypto.randomUUID if available, otherwise fallback to a UUIDv4 polyfill.
   try {
     const rnd = (globalThis as any).crypto?.randomUUID;
     if (typeof rnd === 'function') return rnd();
   } catch (e) {
+    // ignore and fall back
   }
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
     const r = (Math.random() * 16) | 0;
@@ -16,16 +22,24 @@ function generateUUID(): string {
   });
 }
 
+/**
+ * GET /api/thread
+ *
+ * Supports several modes depending on query parameters:
+ * - ?shareCode=CODE : return the shared thread (publicly accessible)
+ * - ?idThread=ID   : return a specific thread when authenticated and owner
+ * - no params      : return the list of threads for the authenticated user
+ */
 export async function GET(_req: NextRequest) {
   try {
-    // Support fetching a shared thread by share code: /api/thread?shareCode=CODE
+    // 1) Support fetching a shared thread by share code: /api/thread?shareCode=CODE
     try {
       const shareCode = _req.nextUrl.searchParams.get('shareCode');
       if (shareCode) {
         const share = await prisma.share.findUnique({ where: { code: shareCode }, include: { thread: { include: { messages: true } } } });
         if (!share || !share.thread) return NextResponse.json({ error: 'Share not found' }, { status: 404 });
         const thread = share.thread;
-        // return thread in a compact shape similar to the client-side expectations
+        // Return a compact shape expected by client code
         return NextResponse.json({
           id: thread.id,
           idThread: thread.idThread ?? thread.id,
@@ -35,7 +49,6 @@ export async function GET(_req: NextRequest) {
           context: thread.context ?? null,
           model: thread.model ?? null,
           messages: thread.messages ?? [],
-          
         });
       }
     } catch (e) {
@@ -43,7 +56,7 @@ export async function GET(_req: NextRequest) {
       // fallthrough to listing all threads
     }
 
-    // Support fetching a thread by external idThread with permission check: /api/thread?idThread=ID
+    // 2) Support fetching a thread by external idThread with permission check: /api/thread?idThread=ID
     try {
       const idThread = _req.nextUrl.searchParams.get('idThread');
       if (idThread) {
@@ -91,29 +104,31 @@ export async function GET(_req: NextRequest) {
       console.error('GET /api/thread idThread handler error', e);
       // fallthrough to listing all threads
     }
+
+    // 3) Default: list threads for the authenticated user
     const access_token = _req.headers.get('authorization')?.split(' ')[1] || _req.cookies.get('access_token')?.value;
     let rows : any[] = [];
     if (access_token) {
       try {
-      const dbToken = await prisma.accessToken.findUnique({
-        where: { token: access_token },
-        include: { user: true },
-      });
-      if (dbToken?.user) {
-        const threads = await prisma.thread.findMany({
-          where: { userId: dbToken.user.id },
-          include: { messages: true },
-          orderBy: { createdAt: 'asc' },
+        const dbToken = await prisma.accessToken.findUnique({
+          where: { token: access_token },
+          include: { user: true },
         });
-        rows = threads;
-      } else {
+        if (dbToken?.user) {
+          const threads = await prisma.thread.findMany({
+            where: { userId: dbToken.user.id },
+            include: { messages: true },
+            orderBy: { createdAt: 'asc' },
+          });
+          rows = threads;
+        } else {
+          rows = [];
+        }
+      } catch (err) {
+        console.error('GET /api/thread token lookup failed', err);
         rows = [];
       }
-      } catch (err) {
-      console.error('GET /api/thread token lookup failed', err);
-      rows = [];
-      }
-    } 
+    }
     return NextResponse.json(rows);
   } catch (err) {
     console.error('GET /api/thread error', err);
@@ -121,11 +136,23 @@ export async function GET(_req: NextRequest) {
   }
 }
 
+/**
+ * POST /api/thread
+ *
+ * Handles multiple actions specified by body.action:
+ * - create: create a new thread (requires authentication). Body: { action: 'create', data: {...} }
+ * - share: create or return a share code for a thread owned by the user. Body: { action: 'share', idThread }
+ * - sync: bulk-insert messages (used for synchronization/import). Body: { action: 'sync', messages: [...] }
+ * - update: update thread metadata (name, context, model). Body: { action: 'update', idThread, data }
+ */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    // keep a debug line for request inspection during development
     console.log('POST /api/thread body:', JSON.stringify(body));
     const action = body?.action ?? 'create';
+
+    // Reusable helper that resolves the user from Authorization header or cookie
     async function resolveUserFromRequest(req: NextRequest) {
       try {
         const authHeader = req.headers.get('authorization') ?? '';
@@ -155,7 +182,7 @@ export async function POST(req: NextRequest) {
       }
       // ensure we set userId for the required relation
       const payload = { ...data, userId: user.id };
-        try {
+      try {
         const created = await prisma.thread.create({ data: payload, include: { messages: true } });
         return NextResponse.json(created, { status: 201 });
       } catch (err) {
@@ -165,6 +192,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: message, stack: (err && (err as any).stack) ? (err as any).stack : undefined }, { status: 500 });
       }
     }
+
     if (action === 'share') {
       const idThread = body?.idThread;
       if (!idThread || typeof idThread !== 'string') {
@@ -201,41 +229,39 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Failed to create share' }, { status: 500 });
       }
     }
+
     if (action === 'sync') {
       const messages = body?.messages ?? [];
       if (!Array.isArray(messages)) return NextResponse.json({ error: 'Invalid messages' }, { status: 400 });
-      
-        const mapped: any[] = [];
-        for (const m of messages) {
-          mapped.push({
-            id: generateUUID(),
-            idMessage: m.idMessage ?? undefined,
-            idThread: m.idThread ?? undefined,
-            sender: m.sender ?? m.role ?? 'user',
-            text: m.text ?? m.content ?? '',
-            thinking: m.thinking ?? '',
-            parentId: m.parentId,
-            sentAt: m.date ? ensureDate(m.date) : ensureDate(undefined),
-            attachmentId: m.attachmentId
-          });
-        }
-        const threads = await prisma.thread.findMany();
 
-       
-        if (mapped.length === 0) return NextResponse.json({ ok: true, inserted: 0 });
-
-        const result = await prisma.message.createMany({
-          data: mapped,
-          skipDuplicates: true,
+      const mapped: any[] = [];
+      for (const m of messages) {
+        mapped.push({
+          id: generateUUID(),
+          idMessage: m.idMessage ?? undefined,
+          idThread: m.idThread ?? undefined,
+          sender: m.sender ?? m.role ?? 'user',
+          text: m.text ?? m.content ?? '',
+          thinking: m.thinking ?? '',
+          parentId: m.parentId,
+          sentAt: m.date ? ensureDate(m.date) : ensureDate(undefined),
+          attachmentId: m.attachmentId,
         });
-        const update = await prisma.thread.update({
-          where: { idThread: mapped[0].idThread },
-          data: { updatedAt: new Date() },
-          
-        })
+      }
 
-        return NextResponse.json({ ok: true, inserted: result.count });
-      
+      if (mapped.length === 0) return NextResponse.json({ ok: true, inserted: 0 });
+
+      const result = await prisma.message.createMany({
+        data: mapped,
+        skipDuplicates: true,
+      });
+      // Update the thread's updatedAt to the current time for the affected thread
+      await prisma.thread.update({
+        where: { idThread: mapped[0].idThread },
+        data: { updatedAt: new Date() },
+      });
+
+      return NextResponse.json({ ok: true, inserted: result.count });
     }
 
     if (action === 'update') {

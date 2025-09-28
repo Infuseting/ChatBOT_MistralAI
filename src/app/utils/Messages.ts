@@ -1,13 +1,7 @@
 import { Message } from "./Message";
 
+// Type alias for an array of Message objects
 type Messages = Message[];
 
-export function getTrees(Messages: Messages) {
-    const tree: { [key: string]: string } = {};
-    Messages.forEach(msg => {
-        tree[msg.parentId ?? 'root'] = msg.id;
-    });
-    return tree;
-}
-
+// Export the Messages type for other modules to import
 export type { Messages };

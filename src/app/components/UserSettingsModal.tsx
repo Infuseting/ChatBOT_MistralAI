@@ -11,6 +11,16 @@ import ContextSettings from './ContextSettings';
 
 const MotionFaTimes = motion(FaTimes);
 
+
+/**
+ * UserSettingsModal
+ *
+ * Modal presenting account, model and context settings. The left-hand column
+ * switches between panels and the right-hand area renders the active panel.
+ *
+ * Props:
+ * - onClose(): callback invoked when the modal should be closed
+ */
 export default function UserSettingsModal({ onClose }: { onClose: () => void }) {
     const [panel, setPanel] = useState<'account' | 'modele' | 'context'>('account');
 

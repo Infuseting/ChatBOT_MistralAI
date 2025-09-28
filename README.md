@@ -193,7 +193,7 @@ High-level endpoints (see `src/app/api`):
 | Subthread | ❌ | ❌ | ❌ |
 | Web Search | ✅ | ✅ | ✅ |
 | Keybinds | ❌ | ❌ | ❌ |
-| Comments & Docs | ❌ | ❌ | ❌ |
+| Comments & Docs | ✅ | ✅ | ✅ |
 
 
 ---

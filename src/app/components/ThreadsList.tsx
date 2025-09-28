@@ -34,6 +34,7 @@ export default function ThreadsList({
                     return;
                 }
                 const t = await getThreads();
+                console.log(t);
                 if (!cancelled) setInternalThreads(Array.isArray(t) ? [...t] : []);
             } catch (e) {
                 console.error('ConversationsList: failed to load threads', e);

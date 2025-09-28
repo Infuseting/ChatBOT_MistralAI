@@ -18,6 +18,19 @@ function generateUUID() {
         return (globalThis as any).crypto.randomUUID();
     }
 }
+
+async function readFileAsDataURL(file: File): Promise<string> {
+    return await new Promise((resolve, reject) => {
+        try {
+            const reader = new FileReader();
+            reader.onerror = () => { reject(new Error('Failed to read file')); };
+            reader.onload = () => { resolve(String(reader.result)); };
+            reader.readAsDataURL(file);
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
    
 export function threadExists(id: string) : boolean {
     try {
@@ -165,7 +178,8 @@ export async function openSharedThread(id: string) : Promise<Thread> {
                         sender: m.sender ?? m.role ?? 'user',
                         timestamp: ts,
                         parentId: m.parentId ?? null,
-                        status: 'sync'
+                        status: 'sync',
+                        attachmentId: m.attachmentId
                     };
                 });
 
@@ -295,7 +309,8 @@ export async function reloadThread() {
                         sender: m.sender ?? m.role ?? 'user',
                         timestamp: parseTimestamp(m.timestamp),
                         parentId: m.parentId ?? null,
-                        status: m.status ?? 'sync'
+                        status: m.status ?? 'sync',
+                        attachmentId: m.attachmentId
                     };
                 }) as any;
                 return {
@@ -448,40 +463,339 @@ export function updateAllThreadsList(updated: Thread) {
     updateActualThread();    
 }
 
-function extractThinkingAndText(response : any) {
-  const thinking : string[] = [];
-  const texts : string[] = [];
+function extractThinkingAndText(response: any) {
+  const thinking: string[] = [];
+  const texts: string[] = [];
+  const web_references: Array<Record<string, any>> = [];
 
-  if (!response || !Array.isArray(response.choices)) return { thinking, texts };
+  if (!response || !Array.isArray(response.outputs)) {
+    return { thinking, texts, web_references };
+  }
 
-  for (const choice of response.choices) {
-    const msg = choice.message;
-    if (!msg) continue;
+  for (const output of response.outputs) {
+    if (!output || !output.type) continue;
+    if (output.type === "tool.execution" || output.type === "tool_exec" || output.type === "tool.execution.result") {
+      const toolName = output.name ?? output.tool ?? 'tool';
+      let argsStr = '';
+      if (typeof output.arguments === 'string') {
+        try {
+          argsStr = JSON.stringify(JSON.parse(output.arguments));
+        } catch {
+          argsStr = output.arguments;
+        }
+      } else if (typeof output.arguments === 'object' && output.arguments !== null) {
+        try {
+          argsStr = JSON.stringify(output.arguments);
+        } catch {
+          argsStr = String(output.arguments);
+        }
+      } else {
+        argsStr = String(output.arguments ?? '');
+      }
+      thinking.push(`Tool: ${toolName} → ${argsStr}`);
+    }
 
-    const content = msg.content;
-    if (Array.isArray(content)) {
-      for (const item of content) {
-        if (item.thinking && Array.isArray(item.thinking)) {
-          for (const t of item.thinking) {
-            if (t && typeof t.text === 'string') thinking.push(t.text);
+    if (output.type === "message.output") {
+      const content = output.content;
+      if (typeof content === "string") {
+        texts.push(content);
+      } else if (Array.isArray(content)) {
+        for (const item of content) {
+          if (!item) continue;
+          // plain text pieces
+          if (item.type === "text" && typeof item.text === "string") {
+            texts.push(item.text);
+            continue;
+          }
+          if (typeof item === "string") {
+            texts.push(item);
+            continue;
+          }
+          if (item.type === "tool_reference" || item.type === "web_reference" || item.type === "tool.reference") {
+            web_references.push({
+              tool: item.tool ?? item.name ?? null,
+              url: item.url ?? null,
+              title: item.title ?? null,
+              description: item.description ?? null,
+              favicon: item.favicon ?? null,
+              raw: item
+            });
+            continue;
+          }
+          if (typeof item.text === "string") {
+            texts.push(item.text);
+            continue;
+          }
+          if (typeof item.content === "string") {
+            texts.push(item.content);
+            continue;
+          }
+          if (Array.isArray(item.content)) {
+            for (const sub of item.content) {
+              if (sub && typeof sub === "object" && typeof sub.text === "string") texts.push(sub.text);
+              else if (typeof sub === "string") texts.push(sub);
+            }
           }
         }
-        if (item.text && typeof item.text === 'string') texts.push(item.text);
+      } else if (typeof content === "object" && content !== null) {
+        if (typeof content.text === "string") texts.push(content.text);
+        else if (typeof content.content === "string") texts.push(content.content);
+        else if (Array.isArray(content.content)) {
+          for (const item of content.content) {
+            if (item && typeof item.text === "string") texts.push(item.text);
+            else if (typeof item === "string") texts.push(item);
+          }
+        }
       }
-    } else if (typeof content === 'string') {
-      texts.push(content);
-    } else if (content && typeof content === 'object') {
-      // handle object mapping
-      if (content.thinking) thinking.push(content.thinking);
-      if (content.text) texts.push(content.text);
     }
   }
 
-  return { thinking, texts };
+  return { thinking, texts, web_references };
 }
-export async function handleMessageSend(thread: Thread, content: string) {
+async function createAgent() {
+    const client = new Mistral({apiKey: getApiKey()});
+    await client.beta.agents.create({
+        model: getActualModel(),
+        name: "MistralAI Chat BOT Chat Agent",
+        instructions: "Use the tools to answer the user's questions.",
+        description: "Agent able to do anything.",
+    });
+}
+
+async function existAgent() {
+    const client = new Mistral({apiKey: getApiKey()});
+    const agents = await client.beta.agents.list();
+    return agents.some(a => a.name === "MistralAI Chat BOT Chat Agent");
+}
+async function getAgent() {
+    const client = new Mistral({apiKey: getApiKey()});
+    const agents = await client.beta.agents.list();
+    return agents.find(a => a.name === "MistralAI Chat BOT Chat Agent");
+}
+
+async function createDocsLibrary(thread: Thread, userMessage: Message, files: File[]) {
+    if (files.length === 0) return null;
+    const client = new Mistral({apiKey: getApiKey()});
+    const library =  await client.beta.libraries.create({
+        name: `Library for thread ${userMessage.id}`,
+        description: `Auto-created library for thread ${userMessage.id}`,
+    });
+    if (!library || !library.id) return null;
+
+    const uploadedDocs: any[] = [];
+    for (const file of files) {
+        try {
+            const uploadedDoc = await client.beta.libraries.documents.upload({
+                libraryId: library.id,
+                requestBody: { file: file as any },
+            });
+            if (uploadedDoc) uploadedDocs.push(uploadedDoc);
+            try {
+                console.log('uploaded doc', JSON.stringify(uploadedDoc, null, 2));
+            } catch (e) {
+                console.log('uploaded doc (raw)', uploadedDoc);
+            }
+        } catch (err) {
+            console.error('Failed uploading document to library', err, file.name);
+        }
+    }
+
+    // helper: poll document status using the dedicated status endpoint.
+    // Treat common in-progress values as needing wait, and final states as done.
+    const waitForProcessing = async (docId: string, timeoutMs = 180000, intervalMs = 2000) => {
+        const start = Date.now();
+        // status values we've seen: 'Running', 'Queued', 'Processing', 'Completed', 'Failed', 'Error'
+        const inProgress = new Set(['running', 'queued', 'processing']);
+        const success = new Set(['completed', 'done', 'succeeded']);
+        const failed = new Set(['failed', 'error', 'errored']);
+
+        while (Date.now() - start < timeoutMs) {
+            try {
+                // use the status endpoint which returns a ProcessingStatusOut
+                const statusRes = await client.beta.libraries.documents.status({ libraryId: library.id, documentId: docId });
+                console.log('Document status response', { documentId: docId, statusRes });
+                const statusRaw = (statusRes as any)?.processingStatus ?? (statusRes as any)?.status ?? null;
+                const status = statusRaw ? String(statusRaw).toLowerCase() : null;
+
+                if (!status) {
+                    // if we can't parse a status, try fetching full metadata as a fallback
+                    try {
+                        const info = await client.beta.libraries.documents.get({ libraryId: library.id, documentId: docId });
+                        console.log('Document metadata fallback', info);
+                        const fallbackStatus = (info as any)?.processingStatus ?? (info as any)?.processing?.status ?? null;
+                        const fb = fallbackStatus ? String(fallbackStatus).toLowerCase() : null;
+                        if (fb && !inProgress.has(fb)) return info;
+                    } catch (e) {
+                        // ignore and continue
+                    }
+                } else {
+                    if (success.has(status)) {
+                        // finished successfully
+                        try {
+                            const info = await client.beta.libraries.documents.get({ libraryId: library.id, documentId: docId });
+                            return info;
+                        } catch (e) {
+                            return statusRes;
+                        }
+                    }
+                    if (failed.has(status)) {
+                        console.warn('Document processing failed', { documentId: docId, status });
+                        return statusRes;
+                    }
+                    // if status is inProgress, wait and retry
+                    if (!inProgress.has(status)) {
+                        // unknown but not explicitly in-progress; treat as done
+                        try {
+                            const info = await client.beta.libraries.documents.get({ libraryId: library.id, documentId: docId });
+                            return info;
+                        } catch (e) {
+                            return statusRes;
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('Error while polling document status, will retry', e);
+            }
+            await new Promise(r => setTimeout(r, intervalMs));
+        }
+        console.warn('Timeout while waiting for document processing', { documentId: docId, timeoutMs });
+        return null;
+    };
+
+    // wait for each uploaded document to finish processing (best effort)
+    for (const d of uploadedDocs) {
+        try {
+            const docId = d?.id ?? d?.documentId ?? d;
+            const finalInfo = await waitForProcessing(docId);
+            try {
+                console.log('Final document info', JSON.stringify(finalInfo ?? d, null, 2));
+            } catch (e) {
+                console.log('Final document info (raw)', finalInfo ?? d);
+            }
+            // Try to fetch extracted text (if available) for debugging
+            try {
+                const textContent = await client.beta.libraries.documents.textContent({ libraryId: library.id, documentId: docId });
+                try {
+                    console.log('Extracted text content for document', docId, JSON.stringify(textContent, null, 2));
+                } catch (e) {
+                    console.log('Extracted text content for document', docId, textContent);
+                }
+            } catch (e) {
+                console.warn('Could not fetch extracted text content for', docId, e);
+            }
+        } catch (e) {
+            console.warn('Error while waiting for document processing', e);
+        }
+    }
+
+    userMessage.attachmentId = library.id;
+    return { library, uploadedDocs };
+}
+
+async function getDocsLibrary(libraryId: string) {
+    const client = new Mistral({apiKey: getApiKey()});
+    const libraries = await client.beta.libraries.list();
+    return libraries.data.find(l => l.id === libraryId) ?? null;
+}
+export async function getDocsInLibrary(libraryId: string) {
+    const client = new Mistral({apiKey: getApiKey()});
+    const docs = await client.beta.libraries.documents.list({ libraryId });
+    return docs;
+}
+
+async function updateAgent(thread: Thread, userMessage : Message, libraryId : string) {
+    const client = new Mistral({apiKey: getApiKey()});
+    
+    const text = String(userMessage?.text ?? '').trim();
+
+    const codeRegex = /```|(?:\b(?:code|script|javascript|typescript|python|java|c\+\+|cpp|c#|csharp|ruby|go|rust|bash|shell|sh|dockerfile|sql|query|compile|execute|run|debug|stack trace|traceback|function\s+\w+|class\s+\w+)\b)/i;
+    const imageRegex = /\b(image|picture|photo|generate image|create image|render|illustration|draw|logo|portrait|avatar|icon|png|jpg|jpeg|svg|midjourney|dalle|stable diffusion|sdxl)\b/i;
+    
+    const needCodeInterpreter: boolean = codeRegex.test(text);
+    const needWebSearch: boolean = true;
+    const needImageGeneration: boolean = imageRegex.test(text);
+    console.log(libraryId)
+    const needFileTool: boolean = libraryId !== '';
+
+    let agent = await getAgent();
+    if (!agent) {
+        // ensure agent exists
+        if (!(await existAgent())) {
+            await createAgent();
+        }
+        agent = await getAgent();
+    }
+    if (!agent || !agent.id) {
+        throw new Error('Agent not available');
+    }
+
+    const tools: any[] = [];
+    if (needWebSearch) tools.push({ type: "web_search" });
+    if (needCodeInterpreter) tools.push({ type: "code_interpreter" });
+    if (needImageGeneration) tools.push({ type: "image_generation" });
+    if (needFileTool) tools.push({ type: "document_library", libraryIds: [libraryId] });
+
+    const websearchAgent = await client.beta.agents.update({
+        agentId: agent.id,
+        agentUpdateRequest: {
+            model: thread.model ?? getActualModel(),
+            instructions: thread.context || getContext() || "You are a helpful assistant.",
+            tools
+        },
+    });
+    const library = await getDocsLibrary(libraryId);
+    console.log('Using library', library);
+    console.log('Updated/created agent with tools', websearchAgent);
+    return websearchAgent;
+    
+}
+
+async function runAgent(thread: Thread, userMessage: Message, files : File[] = [], messagesList: any[] = []) {
+    const client = new Mistral({apiKey: getApiKey()});
+    let libraryId =  userMessage.attachmentId
+    console.log(userMessage)
+    if (files.length > 0) {
+        const docsLibrary = await createDocsLibrary(thread, userMessage, files);
+        libraryId = (docsLibrary as any)?.library?.id ?? (docsLibrary as any)?.id ?? '';
+    }
+    if (!(await existAgent())) await createAgent();
+
+    const updatedAgent = await updateAgent(thread, userMessage, libraryId ?? '');
+    console.log('messagesList', messagesList);
+    console.log('updatedAgent before starting conversation', updatedAgent);
+
+    if (!updatedAgent || !updatedAgent.id) {
+        console.error('No agent available to start the conversation. Aborting start call.', { updatedAgent });
+        return { chatResponse: null, attachmentId: libraryId ?? null };
+    }
+
+    let chatResponse: any = null;
+    try {
+        const debugClient = new Mistral({ apiKey: getApiKey(), debugLogger: console });
+        console.log('Starting conversation with agentId', updatedAgent.id, 'and inputs', messagesList);
+        chatResponse = await debugClient.beta.conversations.start({
+            agentId: updatedAgent.id,
+            inputs: [
+                ...messagesList
+            ]
+        });
+        console.log('chatResponse', chatResponse);
+    } catch (err) {
+        console.error('Error starting conversation', err);
+        // return the error wrapped so caller can handle it gracefully
+        return { chatResponse: null, attachmentId: libraryId ?? null };
+    }
+    
+
+    return { chatResponse, attachmentId: libraryId ?? null };
+
+    
+}
+export async function handleMessageSend(thread: Thread, content: string, selectedFiles: File[] = []) {
     const lastMessage = getLastMessage(thread);
     const history = getHistory(thread, lastMessage);
+    
+
     const userMessage: Message = {
         id: generateUUID() ?? '',
         text: content,
@@ -490,6 +804,8 @@ export async function handleMessageSend(thread: Thread, content: string) {
     timestamp: utcNow(),
         parentId: lastMessage?.id ?? 'root',
         status: 'local'
+        ,
+        attachmentId: ''
     };
     const newMessage: Message = {
         id: generateUUID(),
@@ -498,37 +814,44 @@ export async function handleMessageSend(thread: Thread, content: string) {
         sender: 'assistant',
     timestamp: utcNowPlus(1000),
         parentId: userMessage?.id ?? 'root',
-        status: 'local'
+        status: 'local',
+        attachmentId: ''
     }
     thread.messages = [...(thread.messages ?? []), userMessage, newMessage];
         
-    const client = new Mistral({apiKey: getApiKey()});
 
     const messagesList = [
-            {
-                role: "system",
-                content: thread.context || getContext() || "You are a helpful assistant."
-            },
+            
             ...history,
             {
                 role: "user",
                 content: content
-            },
+            }
         ];
 
-    const chatResponse = await client.chat.complete({
-        model: thread.model || getActualModel(),
-        messages: messagesList as any,
-    });
-    if (!chatResponse || !chatResponse.choices || chatResponse.choices.length === 0) {
+    
+    const { chatResponse, attachmentId } = await runAgent(thread, userMessage, selectedFiles, messagesList);
+    console.log(chatResponse);
+    if (!chatResponse || !chatResponse.outputs || chatResponse.outputs.length === 0) {
         newMessage.text = "Error: no response";
         newMessage.thinking = "";
         return;
     }
     const { thinking, texts } = extractThinkingAndText(chatResponse);
+    console.log('Thinking:', thinking, 'Texts:', texts);
     newMessage.text = texts.join('\n');
     newMessage.thinking = thinking.join('\n');
     updateActualThread();
+    try {
+        const cache = readThreadCache();
+        const idx = cache.findIndex(t => t.id === thread.id);
+        if (idx !== -1) {
+            cache[idx] = thread;
+        } else {
+            cache.push(thread);
+        }
+        setThreadCache(cache);
+    } catch (e) {}
     if ((thread.status as any) !== 'remote') {
         await createServerThread(thread);
     }
@@ -546,6 +869,8 @@ export async function handleRegenerateMessage(thread : Thread, message: Message,
     if (!thread || !message) return;
     const msgs = thread.messages ?? [];
     const parentId = message.parentId ?? null;
+    const userMessage : Message | null = msgs.find(m => m.id === parentId && m.sender === 'user') ?? null;
+    if (!userMessage) return;
     if (!parentId) return;
 
     const history = getHistory(thread, msgs.find(m => m.id === parentId) ?? null);
@@ -556,23 +881,19 @@ export async function handleRegenerateMessage(thread : Thread, message: Message,
         sender: 'assistant',
         timestamp: utcNowPlus(1000),
         parentId: parentId,
-        status: 'local'
+        status: 'local',
+        attachmentId: ''
     }
     thread.messages = [...msgs, newMessage];
     updateActualThread();
     const client = new Mistral({apiKey: getApiKey()});
     const messagesList = [
-            {
-                role: "system",
-                content: thread.context || getContext() || "You are a helpful assistant."
-            },
+            
             ...history,
         ];
-    const chatResponse = await client.chat.complete({
-        model: model || thread.model || getActualModel(),
-        messages: messagesList as any,
-    });
-    if (!chatResponse || !chatResponse.choices || chatResponse.choices.length === 0) {
+    const { chatResponse, attachmentId } = await runAgent(thread, userMessage, [], messagesList);
+    console.log(chatResponse);
+    if (!chatResponse || !chatResponse.outputs || chatResponse.outputs.length === 0) {
         newMessage.text = "Error: no response";
         newMessage.thinking = "";
         return;
@@ -608,8 +929,10 @@ export async function handleEditMessage(thread : Thread, message: Message, editM
         sender: 'user',
         timestamp: utcNowPlus(1000),
         parentId: parentId,
-        status: 'local'
+        status: 'local',
+        attachmentId: message.attachmentId
     }
+    
     const newMessage: Message = {
         id: generateUUID(),
         text: '...',
@@ -617,33 +940,30 @@ export async function handleEditMessage(thread : Thread, message: Message, editM
         sender: 'assistant',
         timestamp: utcNowPlus(2000),
         parentId: newUserMessage.id,
-        status: 'local'
+        status: 'local',
+        attachmentId: ''
     }
     thread.messages = [...msgs, newUserMessage, newMessage];
     updateActualThread();
     const client = new Mistral({apiKey: getApiKey()});
     const messagesList = [
-            {
-                role: "system",
-                content: thread.context || getContext() || "You are a helpful assistant."
-            },
+            
             ...history,
             {
                 role: "user",
                 content: editMessage
             },
+            
+        
         ];
-    const chatResponse = await client.chat.complete({
-        model: thread.model || getActualModel(),
-        messages: messagesList as any,
-    });
-    if (!chatResponse || !chatResponse.choices || chatResponse.choices.length === 0) {
+    const { chatResponse, attachmentId } = await runAgent(thread, newUserMessage, [], messagesList);
+    console.log(chatResponse);
+    if (!chatResponse || !chatResponse.outputs || chatResponse.outputs.length === 0) {
         newMessage.text = "Error: no response";
         newMessage.thinking = "";
         return;
     }
-    const choice = chatResponse.choices[0];
-    const { thinking, texts } = extractThinkingAndText(choice);
+    const { thinking, texts } = extractThinkingAndText(chatResponse);
     newMessage.text = texts.join('\n');
     newMessage.thinking = thinking.join('\n');
 
@@ -668,10 +988,10 @@ async function updateThreadList() {
 
 
 async function createServerThread(thread: Thread) {
+    console.log('Creating server thread for', thread);
     try {
         if (thread.status === 'remote') return;
-        if (thread.name === defaultThreadName)
-            thread.name = (await generateThreadName(thread)) || thread.name || defaultThreadName;
+        thread.name = (await generateThreadName(thread)) || thread.name || defaultThreadName;
         try {
             const res = await fetch('/api/thread', {
                 method: 'POST',
@@ -751,8 +1071,8 @@ async function syncServerThread(thread: Thread) {
                     } catch {}
                     return utcNow().getTime();
                 })(),
+                attachmentId: m.attachmentId
             }));
-
         // Call API to sync messages
         try {
             const res = await fetch('/api/thread', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sync', messages: toInsert }) });
@@ -826,12 +1146,13 @@ export async function updateServerThread(thread: Thread) {
 }
 
 async function generateThreadName(thread: Thread) : Promise<string | null> {
-    const history = getHistory(thread);
+    const history = getHistory(thread, getLastMessage(thread), 20);
+    console.log('Generating thread name, history:', history);
     if (history.length === 0) return null;
     const client = new Mistral({apiKey: getApiKey()});
     const prompt = `Generate a short and descriptive title for the following conversation. The title should be concise, ideally under 5 words, and capture the main topic or theme of the discussion. In the language used in the conversation. Do not use quotation marks or punctuation in the title.`
     const chatResponse = await client.chat.complete({
-        model: thread.model || getActualModel(),
+        model: 'ministral-3b-latest',
         messages: [
             ...history,
             {
@@ -841,6 +1162,7 @@ async function generateThreadName(thread: Thread) : Promise<string | null> {
         ],
         stop: ["\n", "."],
     });
+    console.log("Generated chatResponse:", chatResponse);
     const choice = chatResponse.choices[0];
     const msgContent: unknown = choice?.message?.content ?? "";
     if (typeof msgContent === "string") {

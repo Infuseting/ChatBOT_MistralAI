@@ -35,6 +35,7 @@ export async function GET(_req: NextRequest) {
           context: thread.context ?? null,
           model: thread.model ?? null,
           messages: thread.messages ?? [],
+          
         });
       }
     } catch (e) {
@@ -214,7 +215,8 @@ export async function POST(req: NextRequest) {
             text: m.text ?? m.content ?? '',
             thinking: m.thinking ?? '',
             parentId: m.parentId,
-            sentAt: m.date ? ensureDate(m.date) : ensureDate(undefined)
+            sentAt: m.date ? ensureDate(m.date) : ensureDate(undefined),
+            attachmentId: m.attachmentId
           });
         }
         const threads = await prisma.thread.findMany();

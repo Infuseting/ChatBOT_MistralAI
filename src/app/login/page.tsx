@@ -89,12 +89,12 @@ function LoginInner({ redirectUrl }: { redirectUrl: string | null }) {
 
     return (
         <div className="min-h-screen w-full flex">
-            <div className="min-h-full w-1/2">
+            <div className="min-h-full w-1/2 lg:block hidden">
                 <img src="/login.png" alt="Login Image" className="object-cover w-full h-full"/>
             </div>
-            <div className="w-1 bg-black min-h-full"></div>
-            <div className="h-full w-1/2 flex justify-center items-center py-[10%]">
-                <div className="p-8 rounded-md shadow-md w-full max-w-md border-1 border-black">
+            <div className="w-1 bg-black min-h-full lg:block hidden"></div>
+            <div className="lg:h-full h-screen md:w-1/2 w-full md:px-0 px-5 flex mx-auto justify-center items-center lg:py-[10%] py-0 it">
+                <div className="p-8 rounded-md shadow-md w-full md:max-w-md max-w-lg  border-1 border-black">
                     
                     <div className="mb-4 flex flex-col gap-4">
                         {!showMailForm ? (

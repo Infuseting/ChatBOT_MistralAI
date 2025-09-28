@@ -47,7 +47,8 @@ export default function CodePage() {
               sender: m.sender ?? m.role ?? 'user',
               timestamp: m.sentAt ? new Date(m.sentAt) : (m.timestamp ? new Date(m.timestamp) : (m.date ? new Date(m.date) : new Date())),
               parentId: m.parentId ?? null,
-              status: 'sync'
+              status: 'sync',
+              attachmentId: m.attachmentId ?? undefined
             }));
             // mark as remote
             thread.status = 'remote';

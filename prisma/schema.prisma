@@ -59,6 +59,7 @@ model Message {
 
   thread   Thread @relation(fields: [idThread], references: [idThread])
   idThread String
+  attachmentId String? @db.LongText
 }
 
 model AccessToken {

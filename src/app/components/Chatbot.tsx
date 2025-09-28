@@ -10,6 +10,7 @@ import { FaPlus, FaMicrophone, FaPaperPlane } from "react-icons/fa";
 import SystemContextModal from "./SystemContextModal";
 import { getActualModel, getAvailableModelList, getFastModelList, setActualModel } from '../utils/Models';
 import ChatMessages from "./ChatMessages";
+import ChatInput from './ChatInput';
 
 
 export default function Chatbot() {
@@ -363,114 +364,7 @@ export default function Chatbot() {
                     {/* Centered fixed input bar */}
                     <div ref={inputBarRef} className="fixed bottom-0 transform -translate-x-1/2 pb-4 bg-gray-700 pointer-events-auto mx-auto w-[calc(100%_-_2.5rem)] 2xl:max-w-6xl xl:max-w-4xl lg:max-w-3xl md:max-w-2xl sm:max-w-lg max-w-80 max-h-90" style={{ left: '50%' }}>
                         <div className="flex items-center space-x-2 p-4 bg-gray-800 rounded-md shadow-lg ">
-                            
-                            <div className="flex-shrink-0">
-                                <label htmlFor="chat-file-input" className="flex items-center justify-center w-10 h-10 hover:bg-gray-600 text-white rounded-md cursor-pointer select-none" title="Add files" aria-label="Add files">
-                                    <FaPlus className="w-5 h-5" />
-                                </label>
-                                <input
-                                    id="chat-file-input"
-                                    type="file"
-                                    multiple
-                                    className="hidden"
-                                    onChange={(e) => {
-                                        const files = e.currentTarget.files;
-                                        if (!files) return;
-                                        console.log("Files selected:", files);
-                                        
-                                    }}
-                                />
-                            </div>
-
-                        
-                            <div className="flex flex-1 items-center ">
-                                <textarea
-                                    id="chat-input"
-                                    className="w-full bg-gray-800 max-h-80 text-white px-2 conversations-scroll rounded-md resize-none overflow-y-auto focus:outline-none placeholder-gray-400"
-                                    placeholder={`${!isNewestBranch ? "You need to be on the right branch to type your request..." : isShareThread ? "You are in a shared thread. You can't type here." : "Type your request..."}`}
-                                    onInput={(e) => {
-                                        
-                                        const el = e.currentTarget as HTMLTextAreaElement;
-                                        el.style.height = "auto";
-                                        el.style.height = `${el.scrollHeight}px`;
-                                    }}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter' && !e.shiftKey) {
-                                            e.preventDefault();
-                                            const value = (document.getElementById("chat-input") as HTMLTextAreaElement)?.value || "";
-                                            if (value.trim().length === 0) {
-                                                toast.error(`Vous devez entrer un message avant d'envoyer`, {
-                                                    position: "bottom-right",
-                                                    autoClose: 5000,
-                                                    hideProgressBar: false,
-                                                    closeOnClick: false,
-                                                    pauseOnHover: true,
-                                                    draggable: true,
-                                                    progress: undefined,
-                                                    theme: "dark",
-                                                    transition: Bounce,
-                                                }); return;
-
-                                            };
-                                            (document.getElementById("chat-input") as HTMLTextAreaElement).value = "";
-                                            handleMessageSend(actualThread, value);
-                                            const el = e.currentTarget as HTMLTextAreaElement;
-                                            el.style.height = "auto";
-                                            el.style.height = `${el.scrollHeight}px`;
-                                        }
-                                    }}
-                                    disabled={!isNewestBranch || isShareThread}
-                                    
-                                    rows={1}
-                                    style={{ paddingTop: 0, paddingBottom: 0 }}
-                                />
-                            </div>
-
-
-                            <div className="flex-shrink-0 flex items-center 2xl:space-x-2 xl:space-x-2 lg:space-x-2 md:space-x-2">
-                                <button
-                                    type="button"
-                                    className="flex items-center justify-center w-10 h-10  hover:bg-gray-600 text-white rounded-md"
-                                    title="Record voice"
-                                    aria-label="Record voice"
-                                    onClick={() => {
-                                        if (!isNewestBranch) return;
-                                        console.log("Microphone pressed");
-                                    }}
-                                >
-                                    <FaMicrophone className="w-5 h-5" />
-                                </button>
-
-                                <button
-                                    type="button"
-                                    className="flex items-center justify-center px-3 h-10  hover:bg-indigo-500 text-white rounded-md"
-                                    title="Send message"
-                                    disabled={!isNewestBranch || isShareThread}
-                                    aria-label="Send message"
-                                    onClick={() => {
-                                        if (!isNewestBranch) return;
-                                        const value = (document.getElementById("chat-input") as HTMLTextAreaElement)?.value || "";
-                                        if (value.trim().length === 0) {
-                                            toast.error(`Vous devez entrer un message avant d'envoyer`, {
-                                                position: "bottom-right",
-                                                autoClose: 5000,
-                                                hideProgressBar: false,
-                                                closeOnClick: false,
-                                                pauseOnHover: true,
-                                                draggable: true,
-                                                progress: undefined,
-                                                theme: "dark",
-                                                transition: Bounce,
-                                            }); return;
-                                        };
-                                        (document.getElementById("chat-input") as HTMLTextAreaElement).value = "";
-                                        handleMessageSend(actualThread, value);
-                                    }}
-                                    
-                                >
-                                    <FaPaperPlane className="w-5 h-5" />
-                                </button>
-                            </div>
+                            <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} />
                         </div>
                     </div>
                 </div>
@@ -478,111 +372,8 @@ export default function Chatbot() {
                 <div className="w-full h-full flex items-center flex-col justify-center space-y-8">
                     <h1 className="mx-20 text-white 2xl:text-6xl xl:text-5xl lg:text-4xl md:text-3xl sm:text-lg text-lg text-center">Hello. How can I assist you today?</h1>
                     <div className="w-[calc(100%_-_2.5rem)] 2xl:max-w-6xl xl:max-w-4xl lg:max-w-3xl md:max-w-2xl sm:max-w-lg max-w-80 max-h-90 rounded-md p-4 mx-auto bg-gray-800">
-                        <div className="flex items-center space-x-2 ">
-                            
-                            <div className="flex-shrink-0">
-                                <label htmlFor="chat-file-input" className="flex items-center justify-center w-10 h-10 hover:bg-gray-600 text-white rounded-md cursor-pointer select-none" title="Add files" aria-label="Add files">
-                                    <FaPlus className="w-5 h-5" />
-                                </label>
-                                <input
-                                    id="chat-file-input"
-                                    type="file"
-                                    multiple
-                                    className="hidden"
-                                    onChange={(e) => {
-                                        const files = e.currentTarget.files;
-                                        if (!files) return;
-                                        console.log("Files selected:", files);
-                                        
-                                    }}
-                                />
-                            </div>
-
-                        
-                            <div className="flex flex-1 items-center">
-                                <textarea
-                                    id="chat-input"
-                                    className="w-full bg-gray-800 max-h-80 text-white px-2 conversations-scroll rounded-md resize-none overflow-y-auto focus:outline-none placeholder-gray-400"
-                                    placeholder={`${!isNewestBranch ? "You need to be on the right branch to type your request..." : isShareThread ? "You are in a shared thread. You can't type here." : "Type your request..."}`}
-                                    onInput={(e) => {
-                                        const el = e.currentTarget as HTMLTextAreaElement;
-                                        el.style.height = "auto";
-                                        el.style.height = `${el.scrollHeight}px`;
-                                        
-                                    }}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter' && !e.shiftKey) {
-                                            e.preventDefault();
-                                            const value = (document.getElementById("chat-input") as HTMLTextAreaElement)?.value || "";
-                                            if (value.trim().length === 0) {
-                                                toast.error(`Vous devez entrer un message avant d'envoyer`, {
-                                                    position: "bottom-right",
-                                                    autoClose: 5000,
-                                                    hideProgressBar: false,
-                                                    closeOnClick: false,
-                                                    pauseOnHover: true,
-                                                    draggable: true,
-                                                    progress: undefined,
-                                                    theme: "dark",
-                                                    transition: Bounce,
-                                                }); return;
-
-                                            };
-                                            (document.getElementById("chat-input") as HTMLTextAreaElement).value = "";
-                                            handleMessageSend(actualThread, value);
-                                            const el = e.currentTarget as HTMLTextAreaElement;
-                                            el.style.height = "auto";
-                                            el.style.height = `${el.scrollHeight}px`;
-                                        }
-                                    }}
-                                    disabled={!isNewestBranch || isShareThread}
-                                    rows={1}
-                                    style={{ paddingTop: 0, paddingBottom: 0 }}
-                                />
-                            </div>
-
-
-                            <div className="flex-shrink-0 flex items-center 2xl:space-x-2 xl:space-x-2 lg:space-x-2 md:space-x-2">
-                                <button
-                                    type="button"
-                                    className="flex items-center justify-center w-10 h-10  hover:bg-gray-600 text-white rounded-md"
-                                    title="Record voice"
-                                    aria-label="Record voice"
-                                    onClick={() => {
-                                        console.log("Microphone pressed");
-                                    }}
-                                >
-                                    <FaMicrophone className="w-5 h-5" />
-                                </button>
-
-                                <button
-                                    type="button"
-                                    className="flex items-center justify-center px-3 h-10  hover:bg-indigo-500 text-white rounded-md"
-                                    title="Send message"
-                                    aria-label="Send message"
-                                    disabled={!isNewestBranch || isShareThread}
-                                    onClick={() => {
-                                        const value = (document.getElementById("chat-input") as HTMLTextAreaElement)?.value || "";
-                                        if (value.trim().length === 0) {
-                                            toast.error(`Vous devez entrer un message avant d'envoyer`, {
-                                                position: "bottom-right",
-                                                autoClose: 5000,
-                                                hideProgressBar: false,
-                                                closeOnClick: false,
-                                                pauseOnHover: true,
-                                                draggable: true,
-                                                progress: undefined,
-                                                theme: "dark",
-                                                transition: Bounce,
-                                            }); return;
-                                        };
-                                        (document.getElementById("chat-input") as HTMLTextAreaElement).value = "";
-                                        handleMessageSend(actualThread, value);
-                                    }}
-                                >
-                                    <FaPaperPlane className="w-5 h-5" />
-                                </button>
-                            </div>
+                        <div className="flex flex-1 items-center">
+                            <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} />
                         </div>
                     </div>
                     

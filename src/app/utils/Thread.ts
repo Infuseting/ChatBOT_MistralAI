@@ -5,7 +5,7 @@ import { getAvailableModelList, getActualModel } from './Models';
 import { Mistral } from '@mistralai/mistralai';
 import { getApiKey } from './ApiKey';
 import { getUser } from './User';
-import { toast, Bounce } from 'react-toastify';
+import { showErrorToast, showSuccessToast } from './toast';
 import { utcNow, utcNowPlus, ensureIso, ensureDate, parseToUtc } from './DateUTC';
 
 type Thread = { id: string; name: string, date?: Date, messages?: Messages, status?: 'local' | 'remote' | 'unknown', context : string, model?: string, share: boolean };
@@ -1009,7 +1009,7 @@ async function createServerThread(thread: Thread) {
                 const text = await res.text().catch(() => '');
                 console.error('createServerThread API non-ok response', res.status, text);
                 if (typeof window !== 'undefined') {
-                    try { toast.error('Échec lors de la création du thread via API.', { position: "bottom-right", autoClose: 5000, hideProgressBar: false, closeOnClick: false, pauseOnHover: true, draggable: true, progress: undefined, theme: "dark", transition: Bounce }); } catch (e) {}
+                    try { showErrorToast('Échec lors de la création du thread via API.'); } catch (e) {}
                 }
                 return;
             }
@@ -1021,26 +1021,14 @@ async function createServerThread(thread: Thread) {
         } catch (err) {
             console.error('createServerThread API error', err);
             if (typeof window !== 'undefined') {
-                try { toast.error('Erreur lors de la création du thread (API).', { position: "bottom-right", autoClose: 5000, hideProgressBar: false, closeOnClick: false, pauseOnHover: true, draggable: true, progress: undefined, theme: "dark", transition: Bounce }); } catch (e) {}
+                try { showErrorToast('Erreur lors de la création du thread (API).'); } catch (e) {}
             }
         }
 
     } catch (e) {
         console.error('createServerThread error', e);
         if (typeof window !== 'undefined') {
-            try {
-                toast.error('Erreur lors de la création du thread.', {
-                    position: "bottom-right",
-                    autoClose: 5000,
-                    hideProgressBar: false,
-                    closeOnClick: false,
-                    pauseOnHover: true,
-                    draggable: true,
-                    progress: undefined,
-                    theme: "dark",
-                    transition: Bounce,
-                });
-            } catch (e) {}
+            try { showErrorToast('Erreur lors de la création du thread.'); } catch (e) {}
         }
         return;
     }
@@ -1079,31 +1067,19 @@ async function syncServerThread(thread: Thread) {
             if (!res.ok) {
                 const text = await res.text().catch(() => '');
                 console.error('syncServerThread API non-ok response', res.status, text);
-                if (typeof window !== 'undefined') try { toast.error('Échec de la synchronisation via API.', { position: "bottom-right", autoClose: 5000, hideProgressBar: false, closeOnClick: false, pauseOnHover: true, draggable: true, progress: undefined, theme: "dark", transition: Bounce }); } catch (e) {}
+                if (typeof window !== 'undefined') try { showErrorToast('Échec de la synchronisation via API.'); } catch (e) {}
                 return;
             }
             const json = await res.json().catch(() => ({}));
         } catch (err) {
             console.error('syncServerThread API error', err);
-            if (typeof window !== 'undefined') try { toast.error('Erreur lors de la synchronisation (API).', { position: "bottom-right", autoClose: 5000, hideProgressBar: false, closeOnClick: false, pauseOnHover: true, draggable: true, progress: undefined, theme: "dark", transition: Bounce }); } catch (e) {}
+            if (typeof window !== 'undefined') try { showErrorToast('Erreur lors de la synchronisation (API).'); } catch (e) {}
         }
 
     } catch (e) {
         console.error('syncServerThread error', e);
         if (typeof window !== 'undefined') {
-            try {
-                toast.error('Erreur lors de la synchronisation des messages.', {
-                    position: "bottom-right",
-                    autoClose: 5000,
-                    hideProgressBar: false,
-                    closeOnClick: false,
-                    pauseOnHover: true,
-                    draggable: true,
-                    progress: undefined,
-                    theme: "dark",
-                    transition: Bounce,
-                });
-            } catch (err) {}
+            try { showErrorToast('Erreur lors de la synchronisation des messages.'); } catch (err) {}
         }
         return;
     }

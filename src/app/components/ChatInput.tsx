@@ -1,7 +1,7 @@
 "use client"
 import React, { useEffect, useRef, useId, useState } from 'react';
 import { FaPlus, FaMicrophone, FaPaperPlane } from 'react-icons/fa';
-import { toast, Bounce } from 'react-toastify';
+import { showErrorToast, showSuccessToast } from "../utils/toast";
 import { Thread } from '../utils/Thread';
 
 type Props = {
@@ -43,32 +43,12 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
             e.preventDefault();
             const value = textareaRef.current?.value || "";
             if (value.trim().length === 0) {
-                toast.error(`Vous devez entrer un message avant d'envoyer`, {
-                    position: "bottom-right",
-                    autoClose: 5000,
-                    hideProgressBar: false,
-                    closeOnClick: false,
-                    pauseOnHover: true,
-                    draggable: true,
-                    progress: undefined,
-                    theme: "dark",
-                    transition: Bounce,
-                });
+                showErrorToast(`Vous devez entrer un message avant d'envoyer`);
                 return;
             }
             if (textareaRef.current) textareaRef.current.value = "";
             if (!actualThread) {
-                toast.error('Aucun thread ouvert', {
-                    position: "bottom-right",
-                    autoClose: 5000,
-                    hideProgressBar: false,
-                    closeOnClick: false,
-                    pauseOnHover: true,
-                    draggable: true,
-                    progress: undefined,
-                    theme: "dark",
-                    transition: Bounce,
-                });
+                showErrorToast('Aucun thread ouvert');
                 return;
             }
             const files = [...selectedFiles];
@@ -85,33 +65,13 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
     async function onSendClick() {
         if (!isNewestBranch) return;
         const value = textareaRef.current?.value || "";
-        if (value.trim().length === 0) {
-            toast.error(`Vous devez entrer un message avant d'envoyer`, {
-                position: "bottom-right",
-                autoClose: 5000,
-                hideProgressBar: false,
-                closeOnClick: false,
-                pauseOnHover: true,
-                draggable: true,
-                progress: undefined,
-                theme: "dark",
-                transition: Bounce,
-            });
+            if (value.trim().length === 0) {
+            showErrorToast(`Vous devez entrer un message avant d'envoyer`);
             return;
         }
     if (textareaRef.current) textareaRef.current.value = "";
         if (!actualThread) {
-            toast.error('Aucun thread ouvert', {
-                position: "bottom-right",
-                autoClose: 5000,
-                hideProgressBar: false,
-                closeOnClick: false,
-                pauseOnHover: true,
-                draggable: true,
-                progress: undefined,
-                theme: "dark",
-                transition: Bounce,
-            });
+            showErrorToast('Aucun thread ouvert');
             return;
         }
         
@@ -147,7 +107,7 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
             const allowed = Math.max(0, MAX_FILES - selectedFiles.length);
             const msg = `Vous pouvez sélectionner au maximum ${MAX_FILES} fichiers (il reste ${allowed}).`;
             setErrorMessage(msg);
-            toast.error(msg, { position: "bottom-right", autoClose: 5000, theme: "dark", transition: Bounce });
+            showErrorToast(msg);
             e.currentTarget.value = '';
             return;
         }
@@ -158,7 +118,7 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
             const names = oversized.map(sf => sf.file.name).join(', ');
             const msg = `Les fichiers suivants dépassent la taille maximale de 8MB: ${names}`;
             setErrorMessage(msg);
-            toast.error(msg, { position: "bottom-right", autoClose: 7000, theme: "dark", transition: Bounce });
+            showErrorToast(msg);
             e.currentTarget.value = '';
             return;
         }

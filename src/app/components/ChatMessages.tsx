@@ -5,7 +5,7 @@ import { FaCopy, FaEdit, FaSync, FaTimes } from "react-icons/fa";
 import { getFastModelList, getActualModel } from '../utils/Models';
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/react-dom';
-import { toast, Bounce } from 'react-toastify';
+import { showErrorToast, showSuccessToast } from "../utils/toast";
 
 
 export default function ChatMessages({ thread, onNewestBranchChange }: { thread: Thread, onNewestBranchChange?: (v: boolean) => void }) {
@@ -204,38 +204,14 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
     useEffect(() => {
         try {
             (window as any).handleCopyCode = async (code: string) => {
-                try {
-                    const decoded = decodeURIComponent(code);
-                    await navigator.clipboard.writeText(decoded);
                     try {
-                        toast.success('Code copied to clipboard!', {
-                            position: "bottom-right",
-                            autoClose: 5000,
-                            hideProgressBar: false,
-                            closeOnClick: false,
-                            pauseOnHover: true,
-                            draggable: true,
-                            progress: undefined,
-                            theme: "dark",
-                            transition: Bounce,
-                        });
-                    } catch (e) {}
-                } catch (err) {
-                    console.error('Failed to copy code', err);
-                    try {
-                        toast.error('Failed to copy code', {
-                            position: "bottom-right",
-                            autoClose: 5000,
-                            hideProgressBar: false,
-                            closeOnClick: false,
-                            pauseOnHover: true,
-                            draggable: true,
-                            progress: undefined,
-                            theme: "dark",
-                            transition: Bounce,
-                        });
-                    } catch (e) {}
-                }
+                        const decoded = decodeURIComponent(code);
+                        await navigator.clipboard.writeText(decoded);
+                        try { showSuccessToast('Code copied to clipboard!'); } catch (e) {}
+                    } catch (err) {
+                        console.error('Failed to copy code', err);
+                        try { showErrorToast('Failed to copy code'); } catch (e) {}
+                    }
             };
         } catch (e) {
         }
@@ -599,7 +575,7 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
                                                 await updateThreadMessages();
                                             }
                                         } catch (e) {
-                                            try { toast.error('Échec de la modification.'); } catch (e) {}
+                                            try { showErrorToast('Échec de la modification.'); } catch (e) {}
                                         } finally {
                                             setEditingSubmitting(false);
                                             setEditingMessageId(null);
@@ -698,7 +674,7 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
                                         <>
                                             {editingMessageId && editingMessageId !== m.id && (
                                                 <button className="mx-2 text-sm px-2 py-1 rounded bg-gray-700" onClick={() => {
-                                                    try { toast.error('Un autre message est en cours d\'édition.'); } catch (e) {}
+                                                    try { showErrorToast('Un autre message est en cours d\'édition.'); } catch (e) {}
                                                 }}>Édition en cours</button>
                                             )}
                                             {editingMessageId === m.id ? (
@@ -717,7 +693,7 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
                                                                 await updateThreadMessages();
                                                             }
                                                         } catch (e) {
-                                                            try { toast.error('Échec de la modification.'); } catch (e) {}
+                                                            try { showErrorToast('Échec de la modification.'); } catch (e) {}
                                                         } finally {
                                                             setEditingSubmitting(false);
                                                             setEditingMessageId(null);
@@ -730,7 +706,7 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
                                                 <FaEdit title="Edit" className={`hover:text-white cursor-pointer mx-2`} onClick={async () => {
                                                     try {
                                                         if (editingMessageId) {
-                                                            try { toast.error('Un autre message est en cours d\'édition.'); } catch (e) {}
+                                                            try { showErrorToast('Un autre message est en cours d\'édition.'); } catch (e) {}
                                                             return;
                                                         }
                                                         setEditingMessageId(m.id ?? null);

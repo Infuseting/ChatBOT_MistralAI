@@ -3,7 +3,7 @@ import { IoMdSettings, IoMdShareAlt } from "react-icons/io";
 import { motion } from "motion/react";
 import { getActualThread, getShareLink, handleMessageSend, Thread, updateServerThread } from "../utils/Thread";
 import { Message } from "../utils/Message";
-import { toast, Bounce } from "react-toastify";
+import { showErrorToast, showSuccessToast } from "../utils/toast";
 import { useState, useRef, useEffect } from "react";
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/react-dom';
 import { FaPlus, FaMicrophone, FaPaperPlane } from "react-icons/fa";
@@ -40,17 +40,7 @@ export default function Chatbot() {
     const inputBarRef = useRef<HTMLDivElement | null>(null);
     async function handleShare() {
     if (isShareThread) {
-        toast.error('You cannot share a shared thread.', {
-            position: "bottom-right",
-            autoClose: 5000,
-            hideProgressBar: false,
-            closeOnClick: false,
-            pauseOnHover: true,
-            draggable: true,
-            progress: undefined,
-            theme: "dark",
-            transition: Bounce,
-        });
+        showErrorToast('You cannot share a shared thread.');
         return;
     }
     try {
@@ -58,88 +48,28 @@ export default function Chatbot() {
         if (actualThread?.status === 'remote') {
             const shareLink : string | void | null = await getShareLink(actualThread as Thread);
             if (shareLink === null || shareLink === undefined || shareLink.length === 0 || typeof shareLink !== 'string') {
-                toast.error('Failed to generate share link', {
-                    position: "bottom-right",
-                    autoClose: 5000,
-                    hideProgressBar: false,
-                    closeOnClick: false,
-                    pauseOnHover: true,
-                    draggable: true,
-                    progress: undefined,
-                    theme: "dark",
-                    transition: Bounce,
-                });
+                showErrorToast('Failed to generate share link');
                 return;
             }
             await navigator.clipboard.writeText(shareLink ?? '');
-            toast.success('Share link copied to clipboard!', {
-                position: "bottom-right",
-                autoClose: 5000,
-                hideProgressBar: false,
-                closeOnClick: false,
-                pauseOnHover: true,
-                draggable: true,
-                progress: undefined,
-                theme: "dark",
-                transition: Bounce,
-            });
+            showSuccessToast('Share link copied to clipboard!');
         } else {
-            toast.error('You can only share threads that are saved remotely.', {
-                position: "bottom-right",
-                autoClose: 5000,
-                hideProgressBar: false,
-                closeOnClick: false,
-                pauseOnHover: true,
-                draggable: true,
-                progress: undefined,
-                theme: "dark",
-                transition: Bounce,
-            });
+            showErrorToast('You can only share threads that are saved remotely.');
         }
     } catch (err) {
         if (getActualThread() === null) {
-            toast.error('Aucun thread ouvert', {
-                position: "bottom-right",
-                autoClose: 5000,
-                hideProgressBar: false,
-                closeOnClick: false,
-                pauseOnHover: true,
-                draggable: true,
-                progress: undefined,
-                theme: "dark",
-                transition: Bounce,
-            });
+            showErrorToast('Aucun thread ouvert');
             return;
         }
         console.error('Failed to copy link', err);
-        toast.error('Failed to copy link', {
-            position: "bottom-right",
-            autoClose: 5000,
-            hideProgressBar: false,
-            closeOnClick: false,
-            pauseOnHover: true,
-            draggable: true,
-            progress: undefined,
-            theme: "dark",
-            transition: Bounce,
-        });
+        showErrorToast('Failed to copy link');
     }
 }
     function handleDropdown(thread : Thread | null) {
             // Toggle an invisible state to force a re-render when needed.
             // This state does not affect visible UI directly.
             if (!thread) {
-                toast.error('Aucun thread ouvert', {
-                    position: "bottom-right",
-                    autoClose: 5000,
-                    hideProgressBar: false,
-                    closeOnClick: false,
-                    pauseOnHover: true,
-                    draggable: true,
-                    progress: undefined,
-                    theme: "dark",
-                    transition: Bounce,
-                });
+                showErrorToast('Aucun thread ouvert');
                 return;
             }
             setDropdownMenuOpen(prev => !prev);
@@ -193,17 +123,7 @@ export default function Chatbot() {
 
     function handleSelectModel(model: string) {
         
-         toast.success(`Model "${model}" selected`, {
-            position: "bottom-right",
-            autoClose: 5000,
-            hideProgressBar: false,
-            closeOnClick: false,
-            pauseOnHover: true,
-            draggable: true,
-            progress: undefined,
-            theme: "dark",
-            transition: Bounce,
-        });
+         showSuccessToast(`Model "${model}" selected`);
         setModelPanelOpen(false);
         const thread = actualThread;
         if (thread) {
@@ -244,17 +164,7 @@ export default function Chatbot() {
 
     useEffect(() => {
         if (dropdownMenuOpen && getActualThread()?.share) {
-            toast.error('You cannot modify parameter of shared thread.', {
-                position: "bottom-right",
-                autoClose: 5000,
-                hideProgressBar: false,
-                closeOnClick: false,
-                pauseOnHover: true,
-                draggable: true,
-                progress: undefined,
-                theme: "dark",
-                transition: Bounce,
-            })
+            showErrorToast('You cannot modify parameter of shared thread.');
             setDropdownMenuOpen(false);
         }
         if (dropdownMenuOpen) {

@@ -42,7 +42,6 @@ export default function Chatbot() {
     const dropdownTriggerRef = useRef<HTMLElement | null>(null);
     const dropdownElRef = useRef<HTMLElement | null>(null);
     const messagesWrapperRef = useRef<HTMLDivElement | null>(null);
-    const inputBarRef = useRef<HTMLDivElement | null>(null);
     async function handleShare() {
         // Share the current thread by requesting a share link from the server
         // If the thread is already marked as shared, sharing is disabled.
@@ -182,44 +181,8 @@ export default function Chatbot() {
     }, [dropdownMenuOpen]);
 
 
-    // Floating input bar positioning logic
-    useEffect(() => {
-        function updatePosition() {
-            const parent = messagesWrapperRef.current;
-            const bar = inputBarRef.current;
-            if (!parent || !bar) return;
-            const rect = parent.getBoundingClientRect();
-            const centerX = rect.left + rect.width / 2;
-            bar.style.left = `${Math.round(centerX)}px`;
-        }
-
-        let raf = 0;
-        function onScrollOrResize() {
-            if (raf) cancelAnimationFrame(raf);
-            raf = requestAnimationFrame(updatePosition);
-        }
-
-        // Initial position
-        updatePosition();
-
-        window.addEventListener('resize', onScrollOrResize);
-        window.addEventListener('scroll', onScrollOrResize, true);
-        const parentEl = messagesWrapperRef.current;
-        parentEl?.addEventListener('scroll', onScrollOrResize);
-
-        
-
-        const mo = new MutationObserver(onScrollOrResize);
-        mo.observe(document.body, { attributes: true, childList: true, subtree: true });
-
-        return () => {
-            window.removeEventListener('resize', onScrollOrResize);
-            window.removeEventListener('scroll', onScrollOrResize, true);
-            parentEl?.removeEventListener('scroll', onScrollOrResize);
-            mo.disconnect();
-            if (raf) cancelAnimationFrame(raf);
-        };
-    }, [actualThread]);
+    // We now use a static footer for the input. messagesWrapperRef will be the scrollable
+    // area and ChatInput sits in a footer so its height is always respected.
 
   return (
      <div className="w-full h-full bg-gray-700">
@@ -286,26 +249,33 @@ export default function Chatbot() {
                     <p className="text-gray-300 text-lg text-center">No thread selected. Please create or select a thread to start chatting.</p>
                 </div>
             ) : ((actualThread?.messages?.length ?? 0) > 0) ? (
-                <div ref={messagesWrapperRef} className="h-full conversations-scroll overflow-y-auto relative">
-                    <ChatMessages thread={actualThread} onNewestBranchChange={setisNewestBranch} />
-                    {/* Centered fixed input bar */}
-                    <div ref={inputBarRef} className="fixed bottom-0 transform -translate-x-1/2 pb-4 bg-gray-700 pointer-events-auto mx-auto w-[calc(100%_-_2.5rem)] 2xl:max-w-6xl xl:max-w-4xl lg:max-w-3xl md:max-w-2xl sm:max-w-lg max-w-80 max-h-90" style={{ left: '50%' }}>
-                        <div className="flex items-center space-x-2 p-4 bg-gray-800 rounded-md shadow-lg ">
-                            {/* ChatInput: controlled by parent for thread/context and uses handleMessageSend to perform send */}
+                // Layout: column with messages area that fills available space and a footer for ChatInput.
+                <div className="flex flex-col h-full">
+                    <div ref={messagesWrapperRef} className="flex-1 overflow-y-auto conversations-scroll">
+                        <ChatMessages thread={actualThread} onNewestBranchChange={setisNewestBranch} />
+                    </div>
+                    <div className="bg-gray-700 pointer-events-auto mx-auto w-full 2xl:max-w-6xl xl:max-w-4xl lg:max-w-3xl md:max-w-2xl sm:max-w-lg max-w-80 p-4 pt-0">
+                        <div className="flex items-center space-x-2 bg-gray-800 rounded-md shadow-lg w-full p-4">
                             <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} />
                         </div>
                     </div>
                 </div>
             ) : (
-                <div className="w-full h-full flex items-center flex-col justify-center space-y-8">
-                    <h1 className="mx-20 text-white 2xl:text-6xl xl:text-5xl lg:text-4xl md:text-3xl sm:text-lg text-lg text-center">Hello. How can I assist you today?</h1>
-                    <div className="w-[calc(100%_-_2.5rem)] 2xl:max-w-6xl xl:max-w-4xl lg:max-w-3xl md:max-w-2xl sm:max-w-lg max-w-80 max-h-90 rounded-md p-4 mx-auto bg-gray-800">
-                        <div className="flex flex-1 items-center">
-                            {/* Empty-thread input: still uses ChatInput but with empty thread (will error if sent) */}
+                <div className="flex flex-col h-full">
+                    <div className="flex-1 w-full flex items-center flex-col justify-center space-y-8">
+                        <h1 className="mx-20 text-white 2xl:text-6xl xl:text-5xl lg:text-4xl md:text-3xl sm:text-lg text-lg text-center">Hello. How can I assist you today?</h1>
+                        <div className="w-[calc(100%_-_2.5rem)] 2xl:max-w-6xl xl:max-w-4xl lg:max-w-3xl md:max-w-2xl sm:max-w-lg max-w-80 max-h-90 rounded-md p-4 mx-auto bg-gray-800">
+                            <div className="flex flex-1 items-center">
+                                {/* Empty-thread input area (still uses ChatInput) */}
+                                <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} />
+                            </div>
+                        </div>
+                    </div>
+                    <div className="bg-gray-700 pointer-events-auto mx-auto w-full 2xl:max-w-6xl xl:max-w-4xl lg:max-w-3xl md:max-w-2xl sm:max-w-lg max-w-80 p-4">
+                        <div className="flex items-center space-x-2 bg-gray-800 rounded-md shadow-lg w-full p-4">
                             <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} />
                         </div>
                     </div>
-                    
                 </div>
                 
             )

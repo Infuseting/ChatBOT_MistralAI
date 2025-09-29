@@ -539,7 +539,7 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
                     
             {/* render branch messages */}
             {branchWithKeys.map(({ m, key }, i) => (
-                <div ref={i === branchWithKeys.length - 1 ? undefined : undefined} data-msg-id={key} key={key} className={`${i === 0 ? 'mt-[15%]' : i === branchWithKeys.length - 1 ? '2xl:mb-[40%] xl:mb-[40%] lg:mb-[50%] md:mb-[50%] sm:mb-[35%] mb-[100%]' : ''} ${m.sender === 'assistant' ? "max-w-[100%] min-w-[100%]" : "max-w-[80%] min-w-[80%] text-end"} p-3 rounded-md ${m.sender === 'user' ? 'self-end text-white' : 'self-star text-white'}`}>
+                <div ref={i === branchWithKeys.length - 1 ? undefined : undefined} data-msg-id={key} key={key} className={`${i === 0 ? 'mt-8' : ''} ${m.sender === 'assistant' ? "max-w-[100%] min-w-[100%]" : "max-w-[80%] min-w-[80%] text-end"} p-3 rounded-md ${m.sender === 'user' ? 'self-end text-white' : 'self-star text-white'}`}>
                     <div className={`text-lg ${m.sender === 'user' ? 'bg-indigo-600 p-2 rounded-md' : ''}`}>
                         {/* Render attached docs fetched in background (avoid async render) */}
                         {m.sender === 'user' && (docsByAttachment[m.attachmentId ?? ''] ?? []).length > 0 && (

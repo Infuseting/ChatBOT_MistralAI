@@ -1,8 +1,8 @@
 "use client"
 import { IoMdSettings, IoMdShareAlt } from "react-icons/io";
 import { motion } from "motion/react";
-import { getActualThread, getShareLink, handleMessageSend, Thread, updateServerThread } from "../utils/Thread";
-import { Message } from "../utils/Message";
+import { getActualThread, getShareLink, Thread, updateServerThread } from "../utils/Thread";
+import { handleMessageSend } from "../utils/Agent";
 import { showErrorToast, showSuccessToast } from "../utils/toast";
 import { useState, useRef, useEffect } from "react";
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/react-dom';

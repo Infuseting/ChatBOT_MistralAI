@@ -1,6 +1,6 @@
 "use client"
 import React, { useEffect, useRef, useId, useState } from 'react';
-import { cancelActiveRequest, isRequestActive } from '../utils/Thread';
+import { cancelActiveRequest, isRequestActive } from '../utils/DynamicMessage';
 import { FaPlus, FaMicrophone, FaPaperPlane } from 'react-icons/fa';
 import { showErrorToast, showSuccessToast } from "../utils/toast";
 import { Thread } from '../utils/Thread';

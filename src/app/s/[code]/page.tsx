@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Navbar from '../../components/Navbar';
 import Chatbot from '../../components/Chatbot';
-import { readThreadCache, setActualThread, threadExists, openSharedThread } from '../../utils/Thread';
+import { setActualThread, threadExists, openSharedThread } from '../../utils/Thread';
+import { readThreadCache } from '../../utils/ThreadCache';
 import { ToastContainer } from 'react-toastify';
 
 export default function SharePage() {

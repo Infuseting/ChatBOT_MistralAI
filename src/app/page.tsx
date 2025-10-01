@@ -4,8 +4,9 @@ import Chatbot from "./components/Chatbot";
 import Navbar from "./components/Navbar";
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-import { newThread, readOpenThreadMarker, readThreadCache, findThreadById, setActualThread } from './utils/Thread';
+import { newThread, readOpenThreadMarker, findThreadById, setActualThread } from './utils/Thread';
 import { useRouter } from 'next/navigation';
+import { readThreadCache } from "./utils/ThreadCache";
 
 export default function Home() {
   const router = useRouter();

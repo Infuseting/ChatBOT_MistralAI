@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useId, useState } from 'react';
 import { FaPlus, FaMicrophone, FaPaperPlane } from 'react-icons/fa';
 import { showErrorToast, showSuccessToast } from "../utils/toast";
 import { Thread } from '../utils/Thread';
-import { FaTimes } from 'react-icons/fa';
+import { FaTimes, FaImage } from 'react-icons/fa';
 
 // ChatInput props:
 // - actualThread: currently active Thread or null
@@ -16,7 +16,7 @@ type Props = {
     isNewestBranch: boolean;
     isShareThread: boolean;
     // handler requires a non-null Thread. May receive optional files array
-    handleMessageSend: (thread: Thread, value: string, files?: File[]) => Promise<void> | void;
+    handleMessageSend: (thread: Thread, value: string, files?: File[], imageGenerationMode?: boolean) => Promise<void> | void;
 };
 
 export default function ChatInput({ actualThread, isNewestBranch, isShareThread, handleMessageSend }: Props) {
@@ -27,17 +27,9 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
     type SelectedFile = { file: File; previewUrl?: string };
     const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
+    const [imageGenerationMode, setImageGenerationMode] = useState(false);
     const MAX_FILES = 10;
     const MAX_SIZE = 8 * 1024 * 1024; // 8 MB
-    // adjust textarea height on input
-    useEffect(() => {
-        // safety: ensure initial height is correct
-        const el = textareaRef.current;
-        if (!el) return;
-        el.style.height = 'auto';
-        el.style.height = `${el.scrollHeight}px`;
-    }, []);
     // adjust textarea height on input
     function onInput(e: React.FormEvent<HTMLTextAreaElement>) {
         const el = e.currentTarget as HTMLTextAreaElement;
@@ -63,9 +55,7 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
                 prev.forEach(p => { if (p.previewUrl) URL.revokeObjectURL(p.previewUrl); });
                 return [];
             });
-            await handleMessageSend(actualThread, value, files.map(sf => sf.file));
-            const el = e.currentTarget as HTMLTextAreaElement;
-            el.style.height = `${el.scrollHeight}px`;
+            await handleMessageSend(actualThread, value, files.map(sf => sf.file), imageGenerationMode);
         }
     }
     // Handle send button click
@@ -87,7 +77,7 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
             prev.forEach(p => { if (p.previewUrl) URL.revokeObjectURL(p.previewUrl); });
             return [];
         });
-        await handleMessageSend(actualThread, value, files.map(sf => sf.file));
+        await handleMessageSend(actualThread, value, files.map(sf => sf.file), imageGenerationMode);
         // clear selected files after sending
     }
     // Handle file input change
@@ -258,11 +248,14 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
             </div>
             <div className='flex w-full justify-between mt-2'>
             
-                <div className="flex-shrink-0">
+                <div className="flex-shrink-0 flex flex-row">
                     <label htmlFor={fileInputId} className="flex items-center justify-center w-10 h-10 hover:bg-gray-600 text-white rounded-md cursor-pointer select-none" title="Add files" aria-label="Add files">
                         <FaPlus className="w-5 h-5" />
                     </label>
                     <input id={fileInputId} type="file" multiple className="hidden" onChange={onFileChange} />
+                    <button type="button" className={`flex items-center justify-center w-10 h-10 ${imageGenerationMode ? 'bg-gray-500' : ''} hover:bg-gray-600 text-white rounded-md`} title="Generate image" aria-label="Generate image" onClick={() => setImageGenerationMode(prev => !prev)}>
+                        <FaImage className="w-5 h-5" />
+                    </button>
                 </div>
                 <div className="flex-shrink-0 flex items-center 2xl:space-x-2 xl:space-x-2 lg:space-x-2 md:space-x-2">
                     <button type="button" className="flex items-center justify-center w-10 h-10  hover:bg-gray-600 text-white rounded-md" title="Record voice" aria-label="Record voice" onClick={onMicClick}>

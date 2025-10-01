@@ -1,5 +1,5 @@
-import { getActualThread, Thread, handleRegenerateMessage, handleEditMessage, getDocsInLibrary } from "../utils/Thread";
-import { Message } from "../utils/Message";
+import { getActualThread, Thread } from "../utils/Thread";
+import { handleEditMessage, handleRegenerateMessage, Message } from "../utils/Message";
 import { parseMarkdown, isAtRightmostBranch } from "../utils/ChatMessagesHelper";
 import { FaCopy, FaEdit, FaSync, FaTimes } from "react-icons/fa";
 import { getFastModelList, getActualModel } from '../utils/Models';
@@ -76,31 +76,23 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
     const [editingSubmitting, setEditingSubmitting] = useState<boolean>(false);
     const [openThinkingFor, setOpenThinkingFor] = useState<string | null>(null);
     const editingTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-
-    // Cache of documents by attachment id to avoid async calls directly in render
     const [docsByAttachment, setDocsByAttachment] = useState<Record<string, any[]>>({});
-    const fetchedAttachmentIdsRef = useRef<Set<string>>(new Set());
     useEffect(() => {
         let mounted = true;
         (async () => {
-            try {
-                const ids = Array.from(new Set((messages ?? []).map(m => m.attachmentId).filter(id => !!id)));
-                for (const id of ids) {
-                    if (!id) continue;
-                    if (fetchedAttachmentIdsRef.current.has(id)) continue;
-                    try {
-                        const res = await getDocsInLibrary(id);
-                        const list = (res?.data ?? []);
-                        if (!mounted) break;
-                        fetchedAttachmentIdsRef.current.add(id);
-                        setDocsByAttachment(prev => ({ ...prev, [id]: list }));
-                    } catch (e) {
-                        // ignore individual fetch errors
-                    }
-                }
-            } catch (e) {
-                // ignore
+            for (const m of messages) {
+                m.attachments?.forEach(a => {
+                    if (a) {
+                        const messageId = m.id;
+                        const attachments = m.attachments ?? [];
+                        setDocsByAttachment(prev => {
+                            prev[messageId] = attachments;
+                            return { ...prev };
+                        });
+                    } 
+                });
             }
+            
         })();
         return () => { mounted = false; };
     }, [messages]);
@@ -542,11 +534,11 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
                 <div ref={i === branchWithKeys.length - 1 ? undefined : undefined} data-msg-id={key} key={key} className={`${i === 0 ? 'mt-8' : ''} ${m.sender === 'assistant' ? "max-w-[100%] min-w-[100%]" : "max-w-[80%] min-w-[80%] text-end"} p-3 rounded-md ${m.sender === 'user' ? 'self-end text-white' : 'self-star text-white'}`}>
                     <div className={`text-lg ${m.sender === 'user' ? 'bg-indigo-600 p-2 rounded-md' : ''}`}>
                         {/* Render attached docs fetched in background (avoid async render) */}
-                        {m.sender === 'user' && (docsByAttachment[m.attachmentId ?? ''] ?? []).length > 0 && (
+                        {m.sender === 'user' && (docsByAttachment[m.id] ?? []).length > 0 && (
                             <div className="flex flex-row flex-wrap space-x-1 spacey-1">
-                                {((docsByAttachment[m.attachmentId ?? ''] ?? []) as any[]).map((file, index) => (
+                                {((docsByAttachment[m.id] ?? []) as any[]).map((file, index) => (
                                     <div key={index} className="mb-2 p-2 bg-gray-800 rounded w-fit-content">
-                                        {file.name}
+                                        {file.name}.{file.type}
                                     </div>
                                 ))}
                             </div>

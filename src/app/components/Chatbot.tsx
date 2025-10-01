@@ -1,8 +1,8 @@
 "use client"
 import { IoMdSettings, IoMdShareAlt } from "react-icons/io";
 import { motion } from "motion/react";
-import { getActualThread, getShareLink, handleMessageSend, Thread, updateServerThread } from "../utils/Thread";
-import { Message } from "../utils/Message";
+import { getActualThread, getShareLink, Thread, updateServerThread } from "../utils/Thread";
+import { handleMessageSend, Message } from "../utils/Message";
 import { showErrorToast, showSuccessToast } from "../utils/toast";
 import { useState, useRef, useEffect } from "react";
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/react-dom';
@@ -271,11 +271,7 @@ export default function Chatbot() {
                             </div>
                         </div>
                     </div>
-                    <div className="bg-gray-700 pointer-events-auto mx-auto w-full 2xl:max-w-6xl xl:max-w-4xl lg:max-w-3xl md:max-w-2xl sm:max-w-lg max-w-80 p-4">
-                        <div className="flex items-center space-x-2 bg-gray-800 rounded-md shadow-lg w-full p-4">
-                            <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} />
-                        </div>
-                    </div>
+                    
                 </div>
                 
             )

@@ -214,7 +214,7 @@ export default function Navbar() {
 
                 {menuOpen && (
                     <div ref={(node) => { try { userMenuRefs.setFloating(node as any); userMenuElRef.current = node as HTMLElement | null; } catch {} }} style={{ position: userMenuStrategy as any, left: userMenuX ?? 0, top: userMenuY ?? 0, zIndex: 9999 }} className="w-56 p-2 bg-gray-800 rounded-md border border-gray-700 shadow-md space-y-1">
-                        <motion.button onClick={() => setShowSettings(true)} className="w-full text-left p-2 rounded hover:bg-gray-700 flex items-center space-x-4" type="button" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                        <motion.button onClick={() => { setMenuOpen(false); setShowSettings(true)}} className="w-full text-left p-2 rounded hover:bg-gray-700 flex items-center space-x-4" type="button" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                             <IoMdSettings className="text-lg" />
                             <span>Settings</span>
                         </motion.button>

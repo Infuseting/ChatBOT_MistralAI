@@ -12,6 +12,13 @@ enum Sender {
   assistant
 }
 
+enum AttributeType{
+  file
+  image
+  video
+  audio
+}
+
 enum AuthProvider {
   GOOGLE
   MDP
@@ -59,7 +66,8 @@ model Message {
 
   thread   Thread @relation(fields: [idThread], references: [idThread])
   idThread String
-  attachmentId String? @db.LongText
+  // attachments: a message can have zero or many attachments
+  attachments Attachment[]
 }
 
 model AccessToken {
@@ -81,4 +89,23 @@ model Share {
   createdAt DateTime  @default(now())
   expiresAt DateTime?
   clicks    Int       @default(0)
+}
+
+model Attachment {
+  id String @id @default(uuid())
+  fileName String
+  extension String
+  type AttributeType
+  librariesId String 
+  message   Message  @relation(fields: [messageId], references: [id])
+  messageId String
+  data   Data @relation(fields: [dataId], references: [id])
+  dataId String
+}
+
+model Data {
+  id String @id @default(uuid())
+  md5 String @unique
+  data String @db.LongText 
+  attachments Attachment[]
 }

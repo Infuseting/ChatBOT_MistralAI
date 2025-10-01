@@ -11,6 +11,7 @@ import { setActualThread, updateAllThreadsList, updateActualThread } from "./Thr
 import { updateThreadCache } from "./ThreadCache";
 import { createServerThread, syncServerThread } from "./Thread";
 import { generateUUID } from "./crypto";
+import { generateAttachmentFromFiles, getLibrariesId } from "./Attachments";
 function extractThinkingAndText(response: any) {
   const thinking: string[] = [];
   const texts: string[] = [];
@@ -121,137 +122,9 @@ async function getAgent() {
     return agents.find(a => a.name === "MistralAI Chat BOT Chat Agent");
 }
 
-async function createDocsLibrary(thread: Thread, userMessage: Message, files: File[]) {
-    if (files.length === 0) return null;
-    const client = new Mistral({apiKey: getApiKey()});
-    const library =  await client.beta.libraries.create({
-        name: `Library for thread ${userMessage.id}`,
-        description: `Auto-created library for thread ${userMessage.id}`,
-    });
-    if (!library || !library.id) return null;
 
-    const uploadedDocs: any[] = [];
-    for (const file of files) {
-        try {
-            const uploadedDoc = await client.beta.libraries.documents.upload({
-                libraryId: library.id,
-                requestBody: { file: file as any },
-            });
-            if (uploadedDoc) uploadedDocs.push(uploadedDoc);
-            try {
-                console.log('uploaded doc', JSON.stringify(uploadedDoc, null, 2));
-            } catch (e) {
-                console.log('uploaded doc (raw)', uploadedDoc);
-            }
-        } catch (err) {
-            console.error('Failed uploading document to library', err, file.name);
-        }
-    }
 
-    // helper: poll document status using the dedicated status endpoint.
-    // Treat common in-progress values as needing wait, and final states as done.
-    const waitForProcessing = async (docId: string, timeoutMs = 180000, intervalMs = 2000) => {
-        const start = Date.now();
-        // status values we've seen: 'Running', 'Queued', 'Processing', 'Completed', 'Failed', 'Error'
-        const inProgress = new Set(['running', 'queued', 'processing']);
-        const success = new Set(['completed', 'done', 'succeeded']);
-        const failed = new Set(['failed', 'error', 'errored']);
-
-        while (Date.now() - start < timeoutMs) {
-            try {
-                // use the status endpoint which returns a ProcessingStatusOut
-                const statusRes = await client.beta.libraries.documents.status({ libraryId: library.id, documentId: docId });
-                console.log('Document status response', { documentId: docId, statusRes });
-                const statusRaw = (statusRes as any)?.processingStatus ?? (statusRes as any)?.status ?? null;
-                const status = statusRaw ? String(statusRaw).toLowerCase() : null;
-
-                if (!status) {
-                    // if we can't parse a status, try fetching full metadata as a fallback
-                    try {
-                        const info = await client.beta.libraries.documents.get({ libraryId: library.id, documentId: docId });
-                        console.log('Document metadata fallback', info);
-                        const fallbackStatus = (info as any)?.processingStatus ?? (info as any)?.processing?.status ?? null;
-                        const fb = fallbackStatus ? String(fallbackStatus).toLowerCase() : null;
-                        if (fb && !inProgress.has(fb)) return info;
-                    } catch (e) {
-                        // ignore and continue
-                    }
-                } else {
-                    if (success.has(status)) {
-                        // finished successfully
-                        try {
-                            const info = await client.beta.libraries.documents.get({ libraryId: library.id, documentId: docId });
-                            return info;
-                        } catch (e) {
-                            return statusRes;
-                        }
-                    }
-                    if (failed.has(status)) {
-                        console.warn('Document processing failed', { documentId: docId, status });
-                        return statusRes;
-                    }
-                    // if status is inProgress, wait and retry
-                    if (!inProgress.has(status)) {
-                        // unknown but not explicitly in-progress; treat as done
-                        try {
-                            const info = await client.beta.libraries.documents.get({ libraryId: library.id, documentId: docId });
-                            return info;
-                        } catch (e) {
-                            return statusRes;
-                        }
-                    }
-                }
-            } catch (e) {
-                console.warn('Error while polling document status, will retry', e);
-            }
-            await new Promise(r => setTimeout(r, intervalMs));
-        }
-        console.warn('Timeout while waiting for document processing', { documentId: docId, timeoutMs });
-        return null;
-    };
-
-    // wait for each uploaded document to finish processing (best effort)
-    for (const d of uploadedDocs) {
-        try {
-            const docId = d?.id ?? d?.documentId ?? d;
-            const finalInfo = await waitForProcessing(docId);
-            try {
-                console.log('Final document info', JSON.stringify(finalInfo ?? d, null, 2));
-            } catch (e) {
-                console.log('Final document info (raw)', finalInfo ?? d);
-            }
-            // Try to fetch extracted text (if available) for debugging
-            try {
-                const textContent = await client.beta.libraries.documents.textContent({ libraryId: library.id, documentId: docId });
-                try {
-                    console.log('Extracted text content for document', docId, JSON.stringify(textContent, null, 2));
-                } catch (e) {
-                    console.log('Extracted text content for document', docId, textContent);
-                }
-            } catch (e) {
-                console.warn('Could not fetch extracted text content for', docId, e);
-            }
-        } catch (e) {
-            console.warn('Error while waiting for document processing', e);
-        }
-    }
-
-    userMessage.attachmentId = library.id;
-    return { library, uploadedDocs };
-}
-
-async function getDocsLibrary(libraryId: string) {
-    const client = new Mistral({apiKey: getApiKey()});
-    const libraries = await client.beta.libraries.list();
-    return libraries.data.find(l => l.id === libraryId) ?? null;
-}
-export async function getDocsInLibrary(libraryId: string) {
-    const client = new Mistral({apiKey: getApiKey()});
-    const docs = await client.beta.libraries.documents.list({ libraryId });
-    return docs;
-}
-
-async function updateAgent(thread: Thread, userMessage : Message, libraryId : string) {
+async function updateAgent(thread: Thread, userMessage : Message, librariesId : string[]) {
     const client = new Mistral({apiKey: getApiKey()});
     
     const text = String(userMessage?.text ?? '').trim();
@@ -262,12 +135,10 @@ async function updateAgent(thread: Thread, userMessage : Message, libraryId : st
     const needCodeInterpreter: boolean = codeRegex.test(text);
     const needWebSearch: boolean = true;
     const needImageGeneration: boolean = imageRegex.test(text);
-    console.log(libraryId)
-    const needFileTool: boolean = libraryId !== '';
+    const needFileTool: boolean = librariesId.length > 0;
 
     let agent = await getAgent();
     if (!agent) {
-        // ensure agent exists
         if (!(await existAgent())) {
             await createAgent();
         }
@@ -281,7 +152,7 @@ async function updateAgent(thread: Thread, userMessage : Message, libraryId : st
     if (needWebSearch) tools.push({ type: "web_search" });
     if (needCodeInterpreter) tools.push({ type: "code_interpreter" });
     if (needImageGeneration) tools.push({ type: "image_generation" });
-    if (needFileTool) tools.push({ type: "document_library", libraryIds: [libraryId] });
+    if (needFileTool) tools.push({ type: "document_library", libraryIds: [...librariesId] });
 
     const websearchAgent = await client.beta.agents.update({
         agentId: agent.id,
@@ -291,31 +162,19 @@ async function updateAgent(thread: Thread, userMessage : Message, libraryId : st
             tools
         },
     });
-    const library = await getDocsLibrary(libraryId);
-    console.log('Using library', library);
-    console.log('Updated/created agent with tools', websearchAgent);
     return websearchAgent;
     
 }
 
-async function runAgent(thread: Thread, userMessage: Message, files : File[] = [], messagesList: any[] = []) {
-    const client = new Mistral({apiKey: getApiKey()});
-    let libraryId =  userMessage.attachmentId
-    console.log(userMessage)
-    if (files.length > 0) {
-        const docsLibrary = await createDocsLibrary(thread, userMessage, files);
-        libraryId = (docsLibrary as any)?.library?.id ?? (docsLibrary as any)?.id ?? '';
-    }
+async function runAgent(thread: Thread, userMessage: Message, messagesList: any[] = []) {
     if (!(await existAgent())) await createAgent();
-
-    const updatedAgent = await updateAgent(thread, userMessage, libraryId ?? '');
-    console.log('messagesList', messagesList);
-    console.log('updatedAgent before starting conversation', updatedAgent);
-
+    let librariesId = await getLibrariesId(userMessage);
+    const updatedAgent = await updateAgent(thread, userMessage, librariesId ?? []);
     if (!updatedAgent || !updatedAgent.id) {
         console.error('No agent available to start the conversation. Aborting start call.', { updatedAgent });
-        return { chatResponse: null, attachmentId: libraryId ?? null };
+        return { chatResponse: null, attachmentId: librariesId ?? null };
     }
+    
 
     let chatResponse: any = null;
     try {
@@ -329,21 +188,24 @@ async function runAgent(thread: Thread, userMessage: Message, files : File[] = [
         });
         console.log('chatResponse', chatResponse);
     } catch (err) {
-        return { chatResponse: {"detail": [{"msg": err}]}, attachmentId: libraryId ?? null };
+        return { chatResponse: {"detail": [{"msg": err}]}, attachmentId: librariesId ?? null };
     }
     
 
-    return { chatResponse, attachmentId: libraryId ?? null };
+    return { chatResponse, attachmentId: librariesId ?? null };
 
     
 }
 
+
+
+
+
 export async function handleMessageSend(thread: Thread, content: string, selectedFiles: File[] = []) {
-    // If there are any cancelled assistant messages from a previous cancelled operation,
-    // remove them along with their parent user messages so the new send starts from a clean state.
     try { cleanupCancelledMessages(thread, true); } catch (e) {}
     const lastMessage = getLastMessage(thread);
     const history = getHistory(thread, lastMessage);
+    const attachments = await generateAttachmentFromFiles(selectedFiles);
     
 
     const userMessage: Message = {
@@ -355,7 +217,7 @@ export async function handleMessageSend(thread: Thread, content: string, selecte
         parentId: lastMessage?.id ?? 'root',
         status: 'local'
         ,
-        attachmentId: ''
+        attachments: attachments
     };
     const newMessage: Message = {
         id: generateUUID(),
@@ -365,7 +227,7 @@ export async function handleMessageSend(thread: Thread, content: string, selecte
     timestamp: utcNowPlus(1000),
         parentId: userMessage?.id ?? 'root',
         status: 'local',
-        attachmentId: ''
+        attachments: []
     }
     thread.messages = [...(thread.messages ?? []), userMessage, newMessage];
     updateThreadCache(thread);
@@ -385,8 +247,8 @@ export async function handleMessageSend(thread: Thread, content: string, selecte
         ];
 
     
-    const { chatResponse, attachmentId } = await runAgent(thread, userMessage, selectedFiles, messagesList);
-    console.log(chatResponse);
+    const { chatResponse } = await runAgent(thread, userMessage, messagesList);
+
     // If the request was cancelled, activeRequests entry will have been removed by cancelActiveRequest
     if (!activeRequests.has(thread.id)) return;
     if (!chatResponse || !chatResponse.outputs || chatResponse.outputs.length === 0) {
@@ -434,7 +296,7 @@ export async function handleRegenerateMessage(thread : Thread, message: Message,
         timestamp: utcNowPlus(1000),
         parentId: parentId,
         status: 'local',
-        attachmentId: ''
+        attachments: []
     }
     thread.messages = [...msgs, newMessage];
     updateThreadCache(thread);
@@ -446,7 +308,7 @@ export async function handleRegenerateMessage(thread : Thread, message: Message,
             
             ...history,
         ];
-    const { chatResponse, attachmentId } = await runAgent(thread, userMessage, [], messagesList);
+    const { chatResponse, attachmentId } = await runAgent(thread, userMessage, messagesList);
     console.log(chatResponse);
     if (!activeRequests.has(thread.id)) return;
     if (!chatResponse || !chatResponse.outputs || chatResponse.outputs.length === 0) {
@@ -490,7 +352,7 @@ export async function handleEditMessage(thread : Thread, message: Message, editM
         timestamp: utcNowPlus(1000),
         parentId: parentId,
         status: 'local',
-        attachmentId: message.attachmentId
+        attachments: message.attachments
     }
     
     const newMessage: Message = {
@@ -502,7 +364,7 @@ export async function handleEditMessage(thread : Thread, message: Message, editM
         timestamp: utcNowPlus(2000),
         parentId: newUserMessage.id,
         status: 'local',
-        attachmentId: ''
+        attachments: []
     }
     thread.messages = [...msgs, newUserMessage, newMessage];
     try { setActualThread(thread); } catch (e) {}
@@ -521,7 +383,7 @@ export async function handleEditMessage(thread : Thread, message: Message, editM
             
         
         ];
-    const { chatResponse, attachmentId } = await runAgent(thread, newUserMessage, [], messagesList);
+    const { chatResponse, attachmentId } = await runAgent(thread, newUserMessage, messagesList);
     console.log(chatResponse);
     if (!activeRequests.has(thread.id)) return;
     if (!chatResponse || !chatResponse.outputs || chatResponse.outputs.length === 0) {

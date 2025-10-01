@@ -149,6 +149,19 @@ export async function openSharedThread(id: string) : Promise<Thread> {
                             ts = utcNow();
                         }
                     }
+                    // map attachments if present in the shared payload
+                    const atts = (m.attachments ?? m.attachment ?? []) as any[];
+                    const mappedAttachments = (atts || []).map((a: any) => {
+                        return {
+                            fileName: a.fileName ?? a.name ?? '',
+                            fileType: a.extension ?? a.fileType ?? '',
+                            type: a.type ?? a.attributeType ?? 'file',
+                            libraryId: a.libraryId ?? null,
+                            status: 'sync',
+                            data: a.data ? { sha256: a.data.sha256 ?? a.sha256 ?? '', data: a.data.data ?? '' } : (a.sha256 ? { sha256: a.sha256, data: '' } : undefined)
+                        };
+                    }).filter(Boolean);
+
                     return {
                         id: m.idMessage ?? m.id ?? '',
                         text: m.text ?? m.content ?? '',
@@ -157,7 +170,7 @@ export async function openSharedThread(id: string) : Promise<Thread> {
                         timestamp: ts,
                         parentId: m.parentId ?? null,
                         status: 'sync',
-                        attachmentId: m.attachmentId
+                        attachments: mappedAttachments
                     };
                 });
 
@@ -295,7 +308,16 @@ export async function reloadThread() {
                     }
                 };
                 const mappedMsgs = (msgs as any[]).map(m => {
-                    
+                    const attachmentsRaw = m.attachments ?? m.attachment ?? [];
+                    const mappedAttachments = (attachmentsRaw || []).map((a: any) => ({
+                        fileName: a.fileName ?? a.name ?? '',
+                        fileType: a.extension ?? a.fileType ?? '',
+                        type: a.type ?? a.attributeType ?? 'file',
+                        libraryId: a.libraryId ?? null,
+                        status: 'sync',
+                        data: a.data ? { sha256: a.data.sha256 ?? a.sha256 ?? '', data: a.data.data ?? '' } : (a.sha256 ? { sha256: a.sha256, data: '' } : undefined)
+                    })).filter(Boolean);
+
                     return {
                         id: m.idMessage ?? m.id ?? '',
                         text: m.text ?? m.content ?? '',
@@ -304,7 +326,7 @@ export async function reloadThread() {
                         timestamp: parseTimestamp(m.timestamp),
                         parentId: m.parentId ?? null,
                         status: m.status ?? 'sync',
-                        attachmentId: m.attachmentId
+                        attachments: mappedAttachments
                     };
                 }) as any;
                 return {
@@ -488,6 +510,14 @@ export async function syncServerThread(thread: Thread) {
                 text: m.text ?? m.content ?? '',
                 thinking: m.thinking ?? '',
                 parentId: m.parentId ?? null,
+                // include attachments payload so server can persist files and Data
+                attachments: (m.attachments ?? []).map((a: any) => ({
+                    fileName: a.fileName ?? a.name ?? '',
+                    fileType: a.fileType ?? a.extension ?? '',
+                    type: a.type ?? a.attributeType ?? 'file',
+                    libraryId: a.libraryId ?? null,
+                    data: a.data ? { sha256: a.data.sha256 ?? a.sha256 ?? '', data: a.data.data ?? '' } : (a.sha256 ? { sha256: a.sha256, data: '' } : undefined)
+                })).filter(Boolean),
                 date: (() => {
                     const ts = m.timestamp ?? m.date ?? m.time ?? null;
                     if (ts == null) return utcNow().getTime();
@@ -500,8 +530,7 @@ export async function syncServerThread(thread: Thread) {
                         if (d instanceof Date) return d.getTime();
                     } catch {}
                     return utcNow().getTime();
-                })(),
-                attachmentId: m.attachmentId
+                })()
             }));
         // Call API to sync messages
         try {
@@ -513,6 +542,38 @@ export async function syncServerThread(thread: Thread) {
                 return;
             }
             const json = await res.json().catch(() => ({}));
+            try {
+                // If server reports insertedIds, mark local messages and attachments as synced
+                const insertedIds = (json && Array.isArray(json.insertedIds)) ? json.insertedIds : (json && typeof json.inserted === 'number' && Array.isArray(json.insertedIds) ? json.insertedIds : null);
+                if (insertedIds && Array.isArray(insertedIds) && insertedIds.length > 0) {
+                    const threadRef = thread;
+                    const msgsRef = threadRef.messages ?? [] as any[];
+                    let changed = false;
+                    const insertedSet = new Set(insertedIds);
+                    for (const m of msgsRef) {
+                        if (m && m.id && insertedSet.has(m.id)) {
+                            if (m.status !== 'sync') { m.status = 'sync'; changed = true; }
+                            if (Array.isArray(m.attachments)) {
+                                for (const a of m.attachments) {
+                                    if (a && a.status !== 'sync') { a.status = 'sync'; changed = true; }
+                                }
+                            }
+                        }
+                    }
+                    if (changed) {
+                        try {
+                            const all = readThreadCache();
+                            const idx = all.findIndex((t: any) => t.id === threadRef.id);
+                            if (idx !== -1) { all[idx] = threadRef; } else { all.push(threadRef); }
+                            try { setThreadCache(all); } catch (e) {}
+                        } catch (e) {}
+                        try { setActualThread(threadRef); } catch (e) {}
+                        try { updateActualThread(); } catch (e) {}
+                    }
+                }
+            } catch (e) {
+                console.error('Error processing sync response', e);
+            }
         } catch (err) {
             console.error('syncServerThread API error', err);
             if (typeof window !== 'undefined') try { showErrorToast('Erreur lors de la synchronisation (API).'); } catch (e) {}

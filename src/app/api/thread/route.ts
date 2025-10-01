@@ -36,7 +36,7 @@ export async function GET(_req: NextRequest) {
     try {
       const shareCode = _req.nextUrl.searchParams.get('shareCode');
       if (shareCode) {
-        const share = await prisma.share.findUnique({ where: { code: shareCode }, include: { thread: { include: { messages: true } } } });
+  const share = await prisma.share.findUnique({ where: { code: shareCode }, include: { thread: { include: { messages: { include: { attachments: { include: { data: true } } } } } } } });
         if (!share || !share.thread) return NextResponse.json({ error: 'Share not found' }, { status: 404 });
         const thread = share.thread;
         // Return a compact shape expected by client code
@@ -85,7 +85,7 @@ export async function GET(_req: NextRequest) {
         const user = await resolveUserFromRequest(_req);
         if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
 
-        const thread = await prisma.thread.findUnique({ where: { idThread: idThread }, include: { messages: true } });
+  const thread = await prisma.thread.findUnique({ where: { idThread: idThread }, include: { messages: { include: { attachments: { include: { data: true } } } } } });
         if (!thread) return NextResponse.json({ error: 'Thread not found' }, { status: 404 });
         if (thread.userId !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
@@ -117,7 +117,7 @@ export async function GET(_req: NextRequest) {
         if (dbToken?.user) {
           const threads = await prisma.thread.findMany({
             where: { userId: dbToken.user.id },
-            include: { messages: true },
+            include: { messages: { include: { attachments: { include: { data: true } } } } },
             orderBy: { createdAt: 'asc' },
           });
           rows = threads;
@@ -234,34 +234,113 @@ export async function POST(req: NextRequest) {
       const messages = body?.messages ?? [];
       if (!Array.isArray(messages)) return NextResponse.json({ error: 'Invalid messages' }, { status: 400 });
 
-      const mapped: any[] = [];
-      for (const m of messages) {
-        mapped.push({
-          id: generateUUID(),
-          idMessage: m.idMessage ?? undefined,
-          idThread: m.idThread ?? undefined,
+      // collect unique external thread ids used in the payload
+      const externalThreadIds = Array.from(new Set((messages.map((m: any) => m.idThread).filter(Boolean))));
+      if (externalThreadIds.length === 0) return NextResponse.json({ ok: true, inserted: 0 });
+
+      // load server threads for those external ids
+      const serverThreads = await prisma.thread.findMany({ where: { idThread: { in: externalThreadIds } } });
+      const threadByExternal: Record<string, any> = {};
+      for (const t of serverThreads) threadByExternal[t.idThread] = t;
+
+      // resolve user (if any) and available shares for these threads
+      const user = await resolveUserFromRequest(req);
+      const threadInternalIds = serverThreads.map(t => t.id);
+      const shares = threadInternalIds.length ? await prisma.share.findMany({ where: { idThread: { in: threadInternalIds } } }) : [];
+      const threadsWithShare = new Set(shares.map(s => s.idThread));
+
+      // filter allowed messages: target an existing thread and either owner or shared
+      const allowedMessages = messages.filter((m: any) => {
+        const ext = m.idThread;
+        if (!ext) return false;
+        const t = threadByExternal[ext];
+        if (!t) return false;
+        if (user && t.userId === user.id) return true;
+        if (threadsWithShare.has(t.id)) return true;
+        return false;
+      });
+
+      if (allowedMessages.length === 0) return NextResponse.json({ ok: true, inserted: 0 });
+
+      // deduplicate by idMessage and remove existing ones
+      const candidateIds = Array.from(new Set(allowedMessages.map((m: any) => m.idMessage).filter(Boolean)));
+      const existing = candidateIds.length ? await prisma.message.findMany({ where: { idMessage: { in: candidateIds } }, select: { idMessage: true } }) : [];
+      const existingSet = new Set(existing.map(e => e.idMessage));
+      const newMessages = allowedMessages.filter((m: any) => m.idMessage && !existingSet.has(m.idMessage));
+      if (newMessages.length === 0) return NextResponse.json({ ok: true, inserted: 0 });
+
+      // prepare bulk message create payload
+      const createManyPayload = newMessages.map((m: any) => {
+        const t = threadByExternal[m.idThread];
+        return {
+          idMessage: m.idMessage,
+          idThread: t.idThread,
           sender: m.sender ?? m.role ?? 'user',
           text: m.text ?? m.content ?? '',
           thinking: m.thinking ?? '',
-          parentId: m.parentId,
-          sentAt: m.date ? ensureDate(m.date) : ensureDate(undefined),
-          attachmentId: m.attachmentId,
-        });
+          parentId: m.parentId ?? undefined,
+          sentAt: m.date ? ensureDate(m.date) : new Date()
+        };
+      });
+
+      // bulk insert messages
+      if (createManyPayload.length > 0) {
+        await prisma.message.createMany({ data: createManyPayload, skipDuplicates: true });
       }
 
-      if (mapped.length === 0) return NextResponse.json({ ok: true, inserted: 0 });
+      const insertedIds = newMessages.map((m: any) => m.idMessage).filter(Boolean);
 
-      const result = await prisma.message.createMany({
-        data: mapped,
-        skipDuplicates: true,
-      });
-      // Update the thread's updatedAt to the current time for the affected thread
-      await prisma.thread.update({
-        where: { idThread: mapped[0].idThread },
-        data: { updatedAt: new Date() },
-      });
+      // fetch DB id for created messages
+      const createdMessages = insertedIds.length ? await prisma.message.findMany({ where: { idMessage: { in: insertedIds } }, select: { idMessage: true, id: true } }) : [];
+      const dbIdByExternal: Record<string, string> = {};
+      for (const cm of createdMessages) dbIdByExternal[cm.idMessage] = cm.id;
 
-      return NextResponse.json({ ok: true, inserted: result.count });
+      // batch Data upsert/create
+      const dataMap: Record<string, string> = {};
+      for (const m of newMessages) {
+        const atts = Array.isArray(m.attachments) ? m.attachments : (m.attachments ? [m.attachments] : []);
+        for (const a of atts) {
+          const sha = a?.data?.sha256 ?? a?.sha256 ?? null;
+          const dataVal = a?.data?.data ?? '';
+          if (sha && !dataMap[sha]) dataMap[sha] = dataVal;
+        }
+      }
+      const dataCreate = Object.keys(dataMap).map(s => ({ sha256: s, data: dataMap[s] }));
+      if (dataCreate.length > 0) {
+        await (prisma as any).data.createMany({ data: dataCreate, skipDuplicates: true });
+      }
+
+      // batch attachments create
+      const attachmentsCreate: any[] = [];
+      for (const m of newMessages) {
+        const dbId = dbIdByExternal[m.idMessage];
+        if (!dbId) continue;
+        const atts = Array.isArray(m.attachments) ? m.attachments : (m.attachments ? [m.attachments] : []);
+        for (const a of atts) {
+          const sha = a?.data?.sha256 ?? a?.sha256 ?? '';
+          attachmentsCreate.push({
+            fileName: a?.fileName ?? a?.name ?? '',
+            extension: a?.fileType ?? a?.extension ?? '',
+            type: a?.type ?? 'file',
+            libraryId: a?.libraryId ?? '',
+            messageId: dbId,
+            sha256: sha ?? ''
+          });
+        }
+      }
+      if (attachmentsCreate.length > 0) {
+        await (prisma as any).attachment.createMany({ data: attachmentsCreate, skipDuplicates: true });
+      }
+
+      // update threads updatedAt
+      try {
+        const affectedThreadInternalIds = Array.from(new Set(newMessages.map((m: any) => (threadByExternal[m.idThread]?.id)).filter(Boolean)));
+        if (affectedThreadInternalIds.length > 0) {
+          await prisma.thread.updateMany({ where: { id: { in: affectedThreadInternalIds } }, data: { updatedAt: new Date() } });
+        }
+      } catch (e) {}
+
+      return NextResponse.json({ ok: true, inserted: insertedIds.length, insertedIds });
     }
 
     if (action === 'update') {

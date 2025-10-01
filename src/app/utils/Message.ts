@@ -11,6 +11,7 @@
 
 import { updateThreadCache } from "./ThreadCache";
 import { setActualThread, getActualThread,updateActualThread, Thread } from "./Thread";
+import { Attachment } from "./Attachments";
 
 // - attachmentId: optional id pointing to uploaded attachments or libraries
 type Messages = Message[];
@@ -22,7 +23,7 @@ type Message = {
     timestamp: Date,
     parentId: string,
     status: 'sync' | 'local' | 'cancelled' | undefined,
-    attachmentId?: string 
+    attachments: Attachment[]; 
 }
 
 export function cleanupCancelledMessages(thread: Thread, removeParentUser: boolean = false) {

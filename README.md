@@ -184,7 +184,7 @@ High-level endpoints (see `src/app/api`):
 | Deep Think Integration | ✅ | ✅ | ✅ |
 | Edit & Regenerate Requests | ✅ | ✅ | ✅ |
 | Email Login |  ✅ | ✅ | ✅ |
-| Model Features Viewer |  ✅ | ✅ | ✅ |&
+| Model Features Viewer |  ✅ | ✅ | ✅ |
 | File Input | ✅ | ✅ | ✅ |
 | Image OCR | ❌ | ❌ | ❌ |
 | Audio Call | ❌ | ❌ | ❌ |

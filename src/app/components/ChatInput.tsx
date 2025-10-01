@@ -65,6 +65,7 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
                 return [];
             });
             await handleMessageSend(actualThread, value, files.map(sf => sf.file));
+            
             const el = e.currentTarget as HTMLTextAreaElement;
             el.style.height = `${el.scrollHeight}px`;
         }

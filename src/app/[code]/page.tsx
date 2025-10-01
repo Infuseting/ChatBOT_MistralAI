@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Navbar from '../components/Navbar';
 import Chatbot from '../components/Chatbot';
-import { readThreadCache, setActualThread, threadExists } from '../utils/Thread';
+import { setActualThread, threadExists } from '../utils/Thread';
 import { openOrCreateThreadWithId } from '../utils/Thread';
 import { ToastContainer } from 'react-toastify';
 
@@ -48,7 +48,15 @@ export default function CodePage() {
               timestamp: m.sentAt ? new Date(m.sentAt) : (m.timestamp ? new Date(m.timestamp) : (m.date ? new Date(m.date) : new Date())),
               parentId: m.parentId ?? null,
               status: 'sync',
-              attachmentId: m.attachmentId ?? undefined
+              // Map attachments array if present. Each attachment may come with fileName, fileType, type, libraryId and data
+              attachments: (m.attachments ?? []).map((a: any) => ({
+                id: a.idAttachment ?? a.id ?? undefined,
+                fileName: a.fileName ?? a.name ?? '',
+                fileType: a.fileType ?? a.type ?? '',
+                type: a.type ?? a.kind ?? 'file',
+                libraryId: a.libraryId ?? null,
+                data: a.data ? { sha256: a.data.sha256 ?? null, data: a.data.data ?? null } : undefined,
+              })),
             }));
             // mark as remote
             thread.status = 'remote';

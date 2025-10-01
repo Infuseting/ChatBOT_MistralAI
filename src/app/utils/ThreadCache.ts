@@ -64,4 +64,5 @@ export function updateThreadCache(thread: Thread) {
         }
         setThreadCache(cache);
     } catch (e) {}
+    
 }

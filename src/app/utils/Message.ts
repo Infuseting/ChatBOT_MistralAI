@@ -124,7 +124,7 @@ export function getHistory(thread: Thread, lastMessage?: Message | null, limit: 
         }
         
         
-        return history;
+        return history.reverse();
         
     } catch (e) {
         return [];

@@ -1,4 +1,4 @@
-import { getActualThread, Thread } from "../utils/Thread";
+import { getActualThread, Thread, setActualThread, updateActualThread, updateAllThreadsList } from "../utils/Thread";
 import { Message } from "../utils/Message";
 import { parseMarkdown, isAtRightmostBranch } from "../utils/ChatMessagesHelper";
 import { FaCopy, FaEdit, FaSync, FaTimes } from "react-icons/fa";
@@ -7,6 +7,7 @@ import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/react-dom';
 import { showErrorToast, showSuccessToast } from "../utils/toast";
 import { handleEditMessage, handleRegenerateMessage } from "../utils/Agent";
+import { updateThreadCache } from "../utils/ThreadCache";
 
 /**
  * ChatMessages component

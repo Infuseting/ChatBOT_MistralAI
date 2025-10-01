@@ -13,6 +13,61 @@ type Thread = { id: string; name: string, date?: Date, messages?: Messages, stat
 const defaultThreadName = "New Thread";
 const allThreads : Thread[] = [];
 let loadingThreadsPromise: Promise<Thread[]> | null = null;
+// Track active outgoing requests per thread so they can be cancelled from the UI.
+export const activeRequests: Map<string, { controller: AbortController; assistantMessageId: string }> = new Map();
+
+export function startActiveRequest(threadId: string, assistantMessageId: string) {
+    try {
+        const c = new AbortController();
+        activeRequests.set(threadId, { controller: c, assistantMessageId });
+        // notify UI that a request for this thread is active
+        try {
+            const t = (globalThis as any).actualThread ?? null;
+            try { setActualThread(t); } catch (e) {}
+            try { updateActualThread(); } catch (e) {}
+        } catch (e) {}
+        return c;
+    } catch (e) {
+        return null;
+    }
+}
+
+export function isRequestActive(threadId: string) {
+    try { return activeRequests.has(threadId); } catch { return false; }
+}
+
+export function cancelActiveRequest(threadId: string) {
+    try {
+        const entry = activeRequests.get(threadId);
+        if (!entry) return false;
+        try { entry.controller.abort(); } catch (e) {}
+
+        // find thread either from global actualThread or from cache
+        let t: Thread | null = (globalThis as any).actualThread ?? null;
+        if (!t || t.id !== threadId) {
+            try { t = readThreadCache(threadId) as Thread | null; } catch (e) { t = null; }
+        }
+        if (t) {
+            const msgs = t.messages ?? [];
+            const msg = msgs.find(m => m && m.id === entry.assistantMessageId);
+            if (msg) {
+                try {
+                    msg.text = 'Annulé';
+                    msg.thinking = '';
+                    // mark this message as cancelled so it won't be synced to the server
+                    msg.status = 'cancelled';
+                } catch (e) {}
+                try { updateThreadCache(t); } catch (e) {}
+                try { setActualThread(t); } catch (e) {}
+                try { updateActualThread(); } catch (e) {}
+            }
+        }
+        activeRequests.delete(threadId);
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
 function generateUUID() {
     // Generate a UUID using the platform crypto API when available.
     if (typeof globalThis !== 'undefined' && (globalThis as any).crypto && typeof (globalThis as any).crypto.randomUUID === 'function') {
@@ -472,6 +527,27 @@ function updateActualThread() {
     const ev = new CustomEvent('updateActualThread', { });
     window.dispatchEvent(ev);
 }
+function cleanupCancelledMessages(thread: Thread, removeParentUser: boolean = false) {
+    try {
+        if (!thread || !thread.messages || thread.messages.length === 0) return;
+        const msgs = thread.messages ?? [] as any[];
+        // collect ids to remove
+        const toRemove = new Set<string>();
+        for (const m of msgs) {
+            try {
+                if (m && m.status === 'cancelled') {
+                    toRemove.add(m.id);
+                    if (removeParentUser && m.parentId) toRemove.add(m.parentId);
+                }
+            } catch (e) {}
+        }
+        if (toRemove.size === 0) return;
+        thread.messages = msgs.filter(m => !toRemove.has(m.id));
+        try { updateThreadCache(thread); } catch (e) {}
+        try { setActualThread(thread); } catch (e) {}
+        try { updateActualThread(); } catch (e) {}
+    } catch (e) {}
+}
 
 export function getLastMessage(thread: Thread) : Message | null | undefined {
     const msgs = thread.messages ?? [];
@@ -849,9 +925,7 @@ async function runAgent(thread: Thread, userMessage: Message, files : File[] = [
         });
         console.log('chatResponse', chatResponse);
     } catch (err) {
-        console.error('Error starting conversation', err);
-        // return the error wrapped so caller can handle it gracefully
-        return { chatResponse: null, attachmentId: libraryId ?? null };
+        return { chatResponse: {"detail": [{"msg": err}]}, attachmentId: libraryId ?? null };
     }
     
 
@@ -859,7 +933,22 @@ async function runAgent(thread: Thread, userMessage: Message, files : File[] = [
 
     
 }
+export function updateThreadCache(thread: Thread) {
+    try {
+        const cache = readThreadCache();
+        const idx = cache.findIndex(t => t.id === thread.id);
+        if (idx !== -1) {
+            cache[idx] = thread;
+        } else {
+            cache.push(thread);
+        }
+        setThreadCache(cache);
+    } catch (e) {}
+}
 export async function handleMessageSend(thread: Thread, content: string, selectedFiles: File[] = []) {
+    // If there are any cancelled assistant messages from a previous cancelled operation,
+    // remove them along with their parent user messages so the new send starts from a clean state.
+    try { cleanupCancelledMessages(thread, true); } catch (e) {}
     const lastMessage = getLastMessage(thread);
     const history = getHistory(thread, lastMessage);
     
@@ -877,7 +966,7 @@ export async function handleMessageSend(thread: Thread, content: string, selecte
     };
     const newMessage: Message = {
         id: generateUUID(),
-        text: '...',
+        text: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 50 50" class="spinner" role="img" aria-label="loading"><circle cx="25" cy="25" r="20" fill="none" stroke="#cbd5e1" stroke-width="5"/><path fill="#3b82f6" d="M25 5a1 1 0 0 1 1 1v6a1 1 0 0 1-2 0V6a1 1 0 0 1 1-1z"><animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="1s" repeatCount="indefinite"/></path></svg>',
         thinking : '',
         sender: 'assistant',
     timestamp: utcNowPlus(1000),
@@ -886,6 +975,11 @@ export async function handleMessageSend(thread: Thread, content: string, selecte
         attachmentId: ''
     }
     thread.messages = [...(thread.messages ?? []), userMessage, newMessage];
+    updateThreadCache(thread);
+    try { setActualThread(thread); } catch (e) {}
+    try { updateActualThread(); } catch (e) {}
+    // Register active request so UI can offer cancellation
+    try { startActiveRequest(thread.id, newMessage.id ?? ''); } catch (e) {}
         
 
     const messagesList = [
@@ -900,8 +994,10 @@ export async function handleMessageSend(thread: Thread, content: string, selecte
     
     const { chatResponse, attachmentId } = await runAgent(thread, userMessage, selectedFiles, messagesList);
     console.log(chatResponse);
+    // If the request was cancelled, activeRequests entry will have been removed by cancelActiveRequest
+    if (!activeRequests.has(thread.id)) return;
     if (!chatResponse || !chatResponse.outputs || chatResponse.outputs.length === 0) {
-        newMessage.text = "Error: no response";
+        newMessage.text = `<p class='text-red-500'>${chatResponse.detail[0].msg}</p>`;
         newMessage.thinking = "";
         return;
     }
@@ -909,17 +1005,9 @@ export async function handleMessageSend(thread: Thread, content: string, selecte
     console.log('Thinking:', thinking, 'Texts:', texts);
     newMessage.text = texts.join('\n');
     newMessage.thinking = thinking.join('\n');
+    updateThreadCache(thread);
+        
     updateActualThread();
-    try {
-        const cache = readThreadCache();
-        const idx = cache.findIndex(t => t.id === thread.id);
-        if (idx !== -1) {
-            cache[idx] = thread;
-        } else {
-            cache.push(thread);
-        }
-        setThreadCache(cache);
-    } catch (e) {}
     if ((thread.status as any) !== 'remote') {
         await createServerThread(thread);
     }
@@ -929,12 +1017,15 @@ export async function handleMessageSend(thread: Thread, content: string, selecte
     const url = `/${thread.id}`;
     if (typeof window !== 'undefined' && window.history && window.history.pushState) {
         window.history.pushState({}, '', url);
-    } 
+    }
+    try { activeRequests.delete(thread.id); } catch (e) {}
 }
 
 export async function handleRegenerateMessage(thread : Thread, message: Message, model : string) {
     if (message.sender !== 'assistant') return;
     if (!thread || !message) return;
+    // Remove any cancelled assistant messages for this thread before regenerating.
+    try { cleanupCancelledMessages(thread, false); } catch (e) {}
     const msgs = thread.messages ?? [];
     const parentId = message.parentId ?? null;
     const userMessage : Message | null = msgs.find(m => m.id === parentId && m.sender === 'user') ?? null;
@@ -944,7 +1035,7 @@ export async function handleRegenerateMessage(thread : Thread, message: Message,
     const history = getHistory(thread, msgs.find(m => m.id === parentId) ?? null);
     const newMessage: Message = {
         id: generateUUID(),
-        text: 'Regenerate Message',
+        text: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 50 50" class="spinner" role="img" aria-label="loading"><circle cx="25" cy="25" r="20" fill="none" stroke="#cbd5e1" stroke-width="5"/><path fill="#3b82f6" d="M25 5a1 1 0 0 1 1 1v6a1 1 0 0 1-2 0V6a1 1 0 0 1 1-1z"><animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="1s" repeatCount="indefinite"/></path></svg>',
         thinking : '',
         sender: 'assistant',
         timestamp: utcNowPlus(1000),
@@ -953,7 +1044,10 @@ export async function handleRegenerateMessage(thread : Thread, message: Message,
         attachmentId: ''
     }
     thread.messages = [...msgs, newMessage];
-    updateActualThread();
+    updateThreadCache(thread);
+    try { setActualThread(thread); } catch (e) {}
+    try { updateActualThread(); } catch (e) {}
+    try { startActiveRequest(thread.id, newMessage.id ?? ''); } catch (e) {}
     const client = new Mistral({apiKey: getApiKey()});
     const messagesList = [
             
@@ -961,6 +1055,7 @@ export async function handleRegenerateMessage(thread : Thread, message: Message,
         ];
     const { chatResponse, attachmentId } = await runAgent(thread, userMessage, [], messagesList);
     console.log(chatResponse);
+    if (!activeRequests.has(thread.id)) return;
     if (!chatResponse || !chatResponse.outputs || chatResponse.outputs.length === 0) {
         newMessage.text = "Error: no response";
         newMessage.thinking = "";
@@ -969,6 +1064,7 @@ export async function handleRegenerateMessage(thread : Thread, message: Message,
     const { thinking, texts } = extractThinkingAndText(chatResponse);
     newMessage.text = texts.join('\n');
     newMessage.thinking = thinking.join('\n');
+    updateThreadCache(thread);
     updateActualThread();
     if ((thread.status as any) !== 'remote') {
         await createServerThread(thread);
@@ -980,12 +1076,15 @@ export async function handleRegenerateMessage(thread : Thread, message: Message,
     if (typeof window !== 'undefined' && window.history && window.history.pushState) {
         window.history.pushState({}, '', url);
     }
+    try { activeRequests.delete(thread.id); } catch (e) {}
     return newMessage;    
 }
 
 export async function handleEditMessage(thread : Thread, message: Message, editMessage : string) {
     if (message.sender !== 'user') return;
     if (!thread || !message) return;
+    // Remove cancelled assistant messages and their parent user messages before performing an edit-based resend.
+    try { cleanupCancelledMessages(thread, true); } catch (e) {}
     const msgs = thread.messages ?? [];
     const parentId = message.parentId ?? null;
     if (!parentId) return;
@@ -1003,7 +1102,8 @@ export async function handleEditMessage(thread : Thread, message: Message, editM
     
     const newMessage: Message = {
         id: generateUUID(),
-        text: '...',
+        // Use a simple inline SVG spinner for loading state when regenerating
+        text: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 50 50" class="spinner" role="img" aria-label="loading"><circle cx="25" cy="25" r="20" fill="none" stroke="#cbd5e1" stroke-width="5"/><path fill="#3b82f6" d="M25 5a1 1 0 0 1 1 1v6a1 1 0 0 1-2 0V6a1 1 0 0 1 1-1z"><animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="1s" repeatCount="indefinite"/></path></svg>',
         thinking : '',
         sender: 'assistant',
         timestamp: utcNowPlus(2000),
@@ -1012,7 +1112,11 @@ export async function handleEditMessage(thread : Thread, message: Message, editM
         attachmentId: ''
     }
     thread.messages = [...msgs, newUserMessage, newMessage];
-    updateActualThread();
+    try { setActualThread(thread); } catch (e) {}
+    try { updateActualThread(); } catch (e) {}
+    updateThreadCache(thread);
+    try { startActiveRequest(thread.id, newMessage.id ?? ''); } catch (e) {}
+        
     const client = new Mistral({apiKey: getApiKey()});
     const messagesList = [
             
@@ -1026,6 +1130,7 @@ export async function handleEditMessage(thread : Thread, message: Message, editM
         ];
     const { chatResponse, attachmentId } = await runAgent(thread, newUserMessage, [], messagesList);
     console.log(chatResponse);
+    if (!activeRequests.has(thread.id)) return;
     if (!chatResponse || !chatResponse.outputs || chatResponse.outputs.length === 0) {
         newMessage.text = "Error: no response";
         newMessage.thinking = "";
@@ -1041,6 +1146,7 @@ export async function handleEditMessage(thread : Thread, message: Message, editM
     }
     await syncServerThread(thread);
     thread.date = utcNow();
+    updateThreadCache(thread);
     updateAllThreadsList(thread);
     const url = `/${thread.id}`;
     if (typeof window !== 'undefined' && window.history && window.history.pushState) {
@@ -1106,7 +1212,8 @@ async function syncServerThread(thread: Thread) {
         const msgs = (thread.messages ?? []) as any[];
         if (msgs.length === 0) return;
         const toInsert = msgs
-            .filter(m => m.status !== 'sync')
+            // Skip messages that are already synced or explicitly cancelled locally
+            .filter(m => m.status !== 'sync' && m.status !== 'cancelled')
             .map(m => ({
                 idMessage: m.id,
                 idThread: thread.id,

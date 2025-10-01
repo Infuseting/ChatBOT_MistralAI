@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { FaGoogle } from 'react-icons/fa';
 import { IoIosMail } from "react-icons/io";
+import { showErrorToast } from "../utils/toast";
 function LoginInner({ redirectUrl }: { redirectUrl: string | null }) {
     const [mode, setMode] = useState<'login' | 'register'>('login');
     const [email, setEmail] = useState('');
@@ -21,6 +22,7 @@ function LoginInner({ redirectUrl }: { redirectUrl: string | null }) {
 
         if (!access_token) {
             console.error('No access_token returned by Google', credentialResponse);
+            showErrorToast('No token returned by Google');
             setError('No token returned by Google.');
             return;
         }
@@ -37,15 +39,18 @@ function LoginInner({ redirectUrl }: { redirectUrl: string | null }) {
             } else {
                 const txt = await res.text();
                 console.error('Server error', txt);
+                showErrorToast(txt || 'Server error while logging in with Google');
                 setError(txt || 'Server error while logging in with Google');
             }
         } catch (err) {
             console.error('Login failed', err);
+            showErrorToast('Network error during Google login');
             setError('Network error during Google login');
         }
     }
 
     function handleGoogleError() {
+        showErrorToast('Google sign in failed');
         console.error('Google sign in failed');
     }
 

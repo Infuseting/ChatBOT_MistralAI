@@ -16,7 +16,8 @@ type Message = {
     sender: 'user' | 'assistant',
     timestamp: Date,
     parentId: string,
-    status: 'sync' | 'local' | undefined,
+    // 'cancelled' indicates a locally cancelled assistant response which should not be synced to the server
+    status: 'sync' | 'local' | 'cancelled' | undefined,
     attachmentId?: string 
 }
 

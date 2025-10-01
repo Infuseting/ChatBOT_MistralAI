@@ -1,5 +1,6 @@
 "use client"
 import React, { useEffect, useRef, useId, useState } from 'react';
+import { cancelActiveRequest, isRequestActive } from '../utils/Thread';
 import { FaPlus, FaMicrophone, FaPaperPlane } from 'react-icons/fa';
 import { showErrorToast, showSuccessToast } from "../utils/toast";
 import { Thread } from '../utils/Thread';
@@ -269,9 +270,18 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
                         <FaMicrophone className="w-5 h-5" />
                     </button>
 
-                    <button type="button" className="flex items-center justify-center px-3 h-10  hover:bg-indigo-500 text-white rounded-md" title="Send message" aria-label="Send message" disabled={!isNewestBranch || isShareThread} onClick={onSendClick}>
-                        <FaPaperPlane className="w-5 h-5" />
-                    </button>
+                    {
+                        
+                    }
+                    { actualThread && isRequestActive(actualThread.id) ? (
+                        <button type="button" className="flex items-center justify-center px-3 h-10  hover:bg-red-600 text-white rounded-md" title="Cancel request" aria-label="Cancel request" onClick={() => { try { cancelActiveRequest(actualThread.id); } catch (e) {} }}>
+                            <FaTimes className="w-5 h-5" />
+                        </button>
+                    ) : (
+                        <button type="button" className="flex items-center justify-center px-3 h-10  hover:bg-indigo-500 text-white rounded-md" title="Send message" aria-label="Send message" disabled={!isNewestBranch || isShareThread} onClick={onSendClick}>
+                            <FaPaperPlane className="w-5 h-5" />
+                        </button>
+                    ) }
                 </div>
             </div>
         </div>

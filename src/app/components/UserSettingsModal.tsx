@@ -21,8 +21,8 @@ const MotionFaTimes = motion(FaTimes);
  * Props:
  * - onClose(): callback invoked when the modal should be closed
  */
-export default function UserSettingsModal({ onClose }: { onClose: () => void }) {
-    const [panel, setPanel] = useState<'account' | 'modele' | 'context'>('account');
+export default function UserSettingsModal({ onClose, initialPanel }: { onClose: () => void, initialPanel?: 'account' | 'modele' | 'context' }) {
+    const [panel, setPanel] = useState<'account' | 'modele' | 'context'>(initialPanel ?? 'account');
 
     return (
         <div className="fixed inset-0 z-60 flex items-center justify-center">

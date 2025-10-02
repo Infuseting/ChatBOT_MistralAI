@@ -43,6 +43,7 @@ export default function Navbar() {
     const userMenuTriggerRef = useRef<HTMLElement | null>(null);
     const userMenuElRef = useRef<HTMLElement | null>(null);
     const [showSettings, setShowSettings] = useState(false);
+    const [settingsInitialPanel, setSettingsInitialPanel] = useState<'account' | 'modele' | 'context'>('account');
     const [showSearch, setShowSearch] = useState(false);
     const navAnimate = navbarOpen ? { x: 0, opacity: 1 } : { x: -280, opacity: 0 };
     // thread loading moved into ConversationsList
@@ -102,6 +103,18 @@ export default function Navbar() {
     }
     useEffect(() => {
         let cancelled = false;
+        const onOpenModelSettings = (ev?: any) => {
+            try {
+                const panel = ev && ev.detail && (ev.detail.panel === 'modele' || ev.detail.panel === 'context' || ev.detail.panel === 'account') ? ev.detail.panel : 'account';
+                setSettingsInitialPanel(panel as any);
+            } catch (e) {
+                setSettingsInitialPanel('account');
+            }
+            setShowSettings(true);
+        };
+
+        if (typeof window !== 'undefined') window.addEventListener('openModelSettings', onOpenModelSettings as any);
+
         async function loadUser() {
             try {
                 const res = await fetch('/api/user', { method: 'GET' });
@@ -117,7 +130,11 @@ export default function Navbar() {
             }
         }
         void loadUser();
-        return () => { cancelled = true; };
+
+        return () => {
+            cancelled = true;
+            if (typeof window !== 'undefined') window.removeEventListener('openModelSettings', onOpenModelSettings as any);
+        };
     }, [router]);
     // threads are now loaded by ConversationsList component
     return (
@@ -208,7 +225,7 @@ export default function Navbar() {
             <div className="relative">
                 <div ref={(node) => { try { userMenuRefs.setReference(node as any); userMenuTriggerRef.current = node as HTMLElement | null; } catch {} }} className="list-none w-full p-2 rounded-md hover:bg-gray-600 flex items-center cursor-pointer" role="button" onClick={() => { setMenuOpen(prev => !prev); setTimeout(() => userMenuUpdate?.(), 0); }}>
                     <img src={user?.picture ?? 'https://placehold.co/32x32'} alt="User Avatar" className="w-6 h-6 rounded-full mr-2" />
-                    <span className="text-sm">{user?.name ?? 'Username'}</span>
+                    <span className="text-sm truncate">{user?.name ?? 'Username'}</span>
                     <IoMdArrowDropdown className={`ml-auto text-gray-400 select-none transform transition-transform duration-200 ${menuOpen ? 'rotate-180' : ''}`} />
                 </div>
 
@@ -225,7 +242,7 @@ export default function Navbar() {
                     </div>
                 )}
             </div>
-            {showSettings && <UserSettingsModal onClose={() => setShowSettings(false)} />}
+            {showSettings && <UserSettingsModal initialPanel={settingsInitialPanel} onClose={() => setShowSettings(false)} />}
             {showSearch && <SearchModal onClose={() => setShowSearch(false)} />}
             
 

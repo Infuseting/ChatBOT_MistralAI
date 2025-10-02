@@ -21,11 +21,17 @@ export function isAtRightmostBranch(sel: Record<string, number>, childrenMap: Ma
 
 
 export function parseMarkdown(text : string ) {
+    // Normalize image sources first (fix raw base64, data:octet-stream, url: prefixes)
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
+        text = parseImageMarkdown(text || '');
+    } catch (e) {}
     const md = require('markdown-it')({
   html: true,
   linkify: true,
   typographer: true,
   breaks: true,
+  img: true,
   highlight: function (str: string, lang: string) {
     if (lang && hljs.getLanguage(lang)) {
       return hljs.highlight(str, { language: lang, ignoreIllegals: true }).value;
@@ -37,15 +43,19 @@ export function parseMarkdown(text : string ) {
   .use(require('markdown-it-sup'))
   .use(require('markdown-it-multimd-table'));
 
+
+
+
+  
 const defaultFence = md.renderer.rules.fence!;
 md.renderer.rules.fence = (tokens: any[], idx: number, options: any, env: any, self: any) => {
-  const token = tokens[idx];
+    const token = tokens[idx];
   const code = token.content;
   const langClass = token.info ? `language-${token.info.trim()}` : '';
   const highlighted = options.highlight?.(code, token.info) ?? '';
   const escapedCode = highlighted || md.utils.escapeHtml(code);
-
-const encoded = encodeURIComponent(code);
+  
+  const encoded = encodeURIComponent(code);
 return `
     <div class="relative rounded-md bg-gray-900 text-white overflow-hidden group">
         <button class="absolute top-2 right-2 text-sm bg-gray-700 hover:bg-gray-600 text-white inline-flex items-center justify-center rounded opacity-0 group-hover:opacity-100 transition h-8 px-3 leading-none"
@@ -133,5 +143,98 @@ md.renderer.rules.link_open = (tokens: any[], idx: number, options: any, env: an
     return self.renderToken(tokens, idx, options);
 };
   const render = md.render(text);
+  
   return <div dangerouslySetInnerHTML={{ __html: render }} />;
+}
+
+export function parseImageMarkdown(text : string ) {
+    if (!text || typeof text !== 'string') return text;
+
+    // Helper: detect common image types by base64 signature
+    const detectMimeFromBase64 = (b64: string): string | null => {
+        // Look at first few bytes after base64 decoding (but avoid decoding large strings often)
+        // We'll just inspect the first few characters of base64 which map to known byte signatures.
+        // Common signatures (in hex):
+        // JPEG: ff d8 ff -> base64 prefix: /9j/
+        // PNG: 89 50 4e 47 -> base64 prefix: iVBORw0
+        // GIF87a/89a: 47 49 46 38 -> base64 prefix: R0lGOD
+        // WEBP: RIFF....WEBP -> base64 prefix: UklGR
+        // SVG is XML text, so data won't be base64 binary signature.
+        if (!b64 || b64.length < 4) return null;
+        if (b64.startsWith('/9j/') || b64.startsWith('/9j')) return 'image/jpeg';
+        if (b64.startsWith('iVBORw0')) return 'image/png';
+        if (b64.startsWith('R0lGOD') || b64.startsWith('R0lG')) return 'image/gif';
+        if (b64.startsWith('UklGR') || b64.startsWith('UklB')) return 'image/webp';
+        return null;
+    };
+
+    // Normalize an image source (could be data:, url:, raw base64, or http(s) link)
+    const normalizeSrc = (src: string): string => {
+        if (!src) return src;
+        src = src.trim();
+
+        // Already a data URL
+        if (src.startsWith('data:')) {
+            // If it's application/octet-stream with base64, try to detect proper MIME
+            const m = src.match(/^data:([^;]+);base64,([\s\S]*)$/);
+            if (m) {
+                const mime = m[1];
+                const payload = m[2];
+                if (mime === 'application/octet-stream') {
+                    const detected = detectMimeFromBase64(payload.slice(0, 32));
+                    if (detected) return `data:${detected};base64,${payload}`;
+                }
+            }
+            return src;
+        }
+
+        // Some code used `url:...` prefix to indicate a remote link — strip it
+        if (src.startsWith('url:')) {
+            const u = src.slice(4).trim();
+            // If the remainder looks like base64 (no slashes, mostly base64 chars) then wrap
+            if (/^[A-Za-z0-9+/=\s]+$/.test(u) && u.length > 32 && !u.includes('/') ) {
+                const b64 = u.replace(/\s+/g, '');
+                const detected = detectMimeFromBase64(b64.slice(0, 32));
+                const mime = detected ?? 'image/png';
+                return `data:${mime};base64,${b64}`;
+            }
+            return u;
+        }
+
+        // Raw base64 (no data: prefix) — detect and wrap
+        // Heuristic: contains no slashes and only base64 chars and length > 100
+        const candidate = src.replace(/\s+/g, '');
+        if (/^[A-Za-z0-9+/=]+$/.test(candidate) && candidate.length > 100) {
+            const detected = detectMimeFromBase64(candidate.slice(0, 32));
+            const mime = detected ?? 'image/png';
+            return `data:${mime};base64,${candidate}`;
+        }
+
+        // Otherwise return unchanged (http(s) links are okay)
+        return src;
+    };
+
+    // Replace image markdown occurrences: ![alt](src) or <img src="..."> occurrences
+    // Handle markdown images first
+    const imgMdRegex = /(!\[[^\]]*\]\()([^ )]+)(\))/g;
+    let out = text.replace(imgMdRegex, (full, pre, src, post) => {
+        try {
+            const fixed = normalizeSrc(src);
+            return `${pre}${fixed}${post}`;
+        } catch (e) {
+            return full;
+        }
+    });
+
+    // Also handle inline HTML <img src="..."> — normalize src attribute
+    out = out.replace(/(<img[^>]*src=["'])([^"']+)(["'][^>]*>)/g, (full, a, src, b) => {
+        try {
+            const fixed = normalizeSrc(src);
+            return `${a}${fixed}${b}`;
+        } catch (e) {
+            return full;
+        }
+    });
+
+    return out;
 }

@@ -630,22 +630,37 @@ export async function generateThreadName(thread: Thread) : Promise<string | null
     if (history.length === 0) return null;
     const client = new Mistral({apiKey: getApiKey()});
     const prompt = `Generate a short and descriptive title for the following conversation. The title should be concise, ideally under 5 words, and capture the main topic or theme of the discussion. In the language used in the conversation. Do not use quotation marks or punctuation in the title.`
-    const chatResponse = await client.chat.complete({
-        model: 'ministral-3b-latest',
-        messages: [
-            ...history,
-            {
-                role: "user",
-                content: prompt
-            },
-        ],
-        stop: ["\n", "."],
-    });
-    console.log("Generated chatResponse:", chatResponse);
-    const choice = chatResponse.choices[0];
-    const msgContent: unknown = choice?.message?.content ?? "";
-    if (typeof msgContent === "string") {
-        return msgContent.trim()
+    // Sanitize history: map to simple role/content objects to avoid sending extra fields (attachments, tool_calls, etc.)
+    const messagesForApi: Array<{ role: string; content: string }> = [];
+    for (const h of history) {
+        try {
+            const role = (h && (h.sender === 'assistant' || h.sender === 'system')) ? 'assistant' : 'user';
+            let content = '';
+            if (typeof h.text === 'string' && h.text.trim().length > 0) content = h.text.trim();
+            else if (typeof (h as any).content === 'string' && (h as any).content.trim().length > 0) content = (h as any).content.trim();
+            if (content.length > 0) messagesForApi.push({ role, content });
+        } catch (e) {
+            // ignore malformed entries
+        }
+    }
+    // Append instruction as the final user message
+    messagesForApi.push({ role: 'user', content: prompt });
+    try {
+        const chatResponse = await client.chat.complete({
+            model: getActualModel() ?? 'ministral-3b-latest',
+            messages: messagesForApi as any,
+            stop: ["\n", "."],
+        });
+        console.log("Generated chatResponse:", chatResponse);
+        const choice = chatResponse.choices[0];
+        const msgContent: unknown = choice?.message?.content ?? "";
+        if (typeof msgContent === "string") {
+            return msgContent.trim()
+        }
+
+    }
+    catch (e) {
+        return null;
     }
     return null;
 

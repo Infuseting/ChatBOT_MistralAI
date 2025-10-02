@@ -12,17 +12,28 @@ import { updateThreadCache } from "./ThreadCache";
 import { createServerThread, syncServerThread } from "./Thread";
 import { generateUUID } from "./crypto";
 import { generateAttachmentFromFiles, getLibrariesId } from "./Attachments";
+import { showErrorToast } from './toast';
 function extractThinkingAndText(response: any) {
   const thinking: string[] = [];
-  const texts: string[] = [];
-  const web_references: Array<Record<string, any>> = [];
+  // images will become an ordered array mixing text and image items in the order they appear
+  const images: Array<Record<string, any>> = [];
 
   if (!response || !Array.isArray(response.outputs)) {
-    return { thinking, texts, web_references };
+    return { thinking, images };
   }
 
   for (const output of response.outputs) {
     if (!output || !output.type) continue;
+    // Detect image-generation style outputs at top level
+    if (output.type === 'image' || output.type === 'image_generation' || output.type === 'image.output') {
+      const url = output.url ?? output.src ?? output.location ?? null;
+      const data = output.data ?? output.base64 ?? output.b64 ?? null;
+      const mime = output.mime ?? output.file_type ?? 'image/png';
+      const filename = output.fileName ?? output.filename ?? `image.${mime.split('/').pop()}`;
+      images.push({ type: 'image', url, data, mime, filename, raw: output });
+      continue;
+    }
+
     if (output.type === "tool.execution" || output.type === "tool_exec" || output.type === "tool.execution.result") {
       const toolName = output.name ?? output.tool ?? 'tool';
       let argsStr = '';
@@ -47,59 +58,190 @@ function extractThinkingAndText(response: any) {
     if (output.type === "message.output") {
       const content = output.content;
       if (typeof content === "string") {
-        texts.push(content);
+        images.push({ type: 'text', text: content, raw: output });
       } else if (Array.isArray(content)) {
         for (const item of content) {
           if (!item) continue;
           // plain text pieces
           if (item.type === "text" && typeof item.text === "string") {
-            texts.push(item.text);
+            images.push({ type: 'text', text: item.text, raw: item });
             continue;
           }
           if (typeof item === "string") {
-            texts.push(item);
+            images.push({ type: 'text', text: item, raw: item });
             continue;
           }
           if (item.type === "tool_reference" || item.type === "web_reference" || item.type === "tool.reference") {
-            web_references.push({
-              tool: item.tool ?? item.name ?? null,
-              url: item.url ?? null,
-              title: item.title ?? null,
-              description: item.description ?? null,
-              favicon: item.favicon ?? null,
-              raw: item
-            });
+            // push a short human-readable entry into thinking in the order it appears
+            const title = item.title ?? item.name ?? null;
+            const url = item.url ?? null;
+            const desc = item.description ?? null;
+            const tool = item.tool ?? null;
+            const entry = `WebRef${title ? `: ${title}` : ''}${url ? ` (${url})` : ''}${tool ? ` [via ${tool}]` : ''}${desc ? ` - ${desc}` : ''}`;
+            thinking.push(entry);
+            continue;
+          }
+          // image items inside content arrays
+          if (item.type === 'image' || item.type === 'image_reference' || item.type === 'image.output') {
+            images.push({ type: 'image', url: item.url ?? item.src ?? null, data: item.data ?? item.base64 ?? null, mime: item.mime ?? item.file_type ?? 'image/png', filename: item.filename ?? item.fileName ?? null, raw: item });
+            continue;
+          }
+          // Support Mistral connector tool_file chunks which reference a generated file by id
+          if (item.type === 'tool_file' || item.type === 'tool.file' || item.type === 'tool_file_chunk' || item.file_id || item.fileId) {
+            const fileId = item.file_id ?? item.fileId ?? item.file ?? null;
+            const fileName = item.file_name ?? item.fileName ?? item.name ?? null;
+            const fileType = item.file_type ?? item.fileType ?? null;
+            if (fileId) {
+              images.push({ type: 'image', fileId, filename: fileName, mime: fileType, url: null, raw: item });
+            }
             continue;
           }
           if (typeof item.text === "string") {
-            texts.push(item.text);
+            images.push({ type: 'text', text: item.text, raw: item });
             continue;
           }
           if (typeof item.content === "string") {
-            texts.push(item.content);
+            images.push({ type: 'text', text: item.content, raw: item });
             continue;
           }
           if (Array.isArray(item.content)) {
             for (const sub of item.content) {
-              if (sub && typeof sub === "object" && typeof sub.text === "string") texts.push(sub.text);
-              else if (typeof sub === "string") texts.push(sub);
+              if (sub && typeof sub === "object" && typeof sub.text === "string") images.push({ type: 'text', text: sub.text, raw: sub });
+              else if (typeof sub === "string") images.push({ type: 'text', text: sub, raw: sub });
+              else if (sub && typeof sub === 'object' && (sub.type === 'image' || sub.type === 'image_reference')) {
+                images.push({ type: 'image', url: sub.url ?? sub.src ?? null, data: sub.data ?? sub.base64 ?? null, mime: sub.mime ?? sub.file_type ?? 'image/png', filename: sub.filename ?? sub.fileName ?? null, raw: sub });
+              }
             }
           }
         }
       } else if (typeof content === "object" && content !== null) {
-        if (typeof content.text === "string") texts.push(content.text);
-        else if (typeof content.content === "string") texts.push(content.content);
+        if (typeof content.text === "string") images.push({ type: 'text', text: content.text, raw: content });
+        else if (typeof content.content === "string") images.push({ type: 'text', text: content.content, raw: content });
         else if (Array.isArray(content.content)) {
           for (const item of content.content) {
-            if (item && typeof item.text === "string") texts.push(item.text);
-            else if (typeof item === "string") texts.push(item);
+            if (item && typeof item.text === "string") images.push({ type: 'text', text: item.text, raw: item });
+            else if (typeof item === "string") images.push({ type: 'text', text: item, raw: item });
+            else if (item && typeof item === 'object' && (item.type === 'image' || item.type === 'image_reference')) {
+              images.push({ type: 'image', url: item.url ?? item.src ?? null, data: item.data ?? item.base64 ?? null, mime: item.mime ?? item.file_type ?? 'image/png', filename: item.filename ?? item.fileName ?? null, raw: item });
+            }
           }
         }
       }
     }
   }
 
-  return { thinking, texts, web_references };
+  return { thinking, images };
+}
+
+// Helper: download a generated file from Mistral files API and return data URL + sha256
+async function fetchGeneratedFileAsDataUrl(fileId: string): Promise<{ dataUrl: string; sha256: string } | null> {
+  try {
+    if (!fileId) return null;
+    const client = new Mistral({ apiKey: getApiKey() });
+    // The SDK exposes client.files.download({ file_id }) that returns a stream/Response-like object.
+    // We try a few shapes to be tolerant across SDK versions.
+    // Preferred: client.files.download({ file_id: fileId }).read()
+    // Fallback: client.files.download(fileId)
+    let raw: any = null;
+    try {
+      const dl = await (client as any).files?.download?.({ fileId: fileId } as any);
+      const anyDl: any = dl;
+      if (!anyDl) {
+        // try alternate signature
+        const alt = await (client as any).files?.download?.(fileId as any);
+        raw = alt as any;
+      } else if (typeof anyDl.arrayBuffer === 'function') {
+        raw = await anyDl.arrayBuffer();
+      } else if (anyDl && anyDl.body) {
+        // body may be a ReadableStream
+        try {
+          raw = await new Response(anyDl.body as any).arrayBuffer();
+        } catch (e) {
+          raw = anyDl;
+        }
+      } else {
+        raw = anyDl;
+      }
+    } catch (e) {
+      console.error('Failed to download file from Mistral SDK', e);
+      return null;
+    }
+
+    // raw may be ArrayBuffer, Uint8Array, ReadableStream, or Buffer-like
+    let arrayBuffer: ArrayBuffer | null = null;
+    if (raw instanceof ArrayBuffer) arrayBuffer = raw;
+    else if (raw && raw.buffer instanceof ArrayBuffer) arrayBuffer = raw.buffer;
+    else if (raw instanceof Uint8Array) arrayBuffer = raw.buffer as ArrayBuffer;
+    else if (raw && typeof raw.getReader === 'function') {
+      // ReadableStream (browser). Try to convert using Response(stream)
+      try {
+        arrayBuffer = await new Response(raw as any).arrayBuffer();
+      } catch (e) {
+        // Fallback: read via reader
+        try {
+          const reader = (raw as any).getReader();
+          const chunks: Uint8Array[] = [];
+          let totalLength = 0;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) {
+              const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+              chunks.push(chunk);
+              totalLength += chunk.length;
+            }
+          }
+          const out = new Uint8Array(totalLength);
+          let offset = 0;
+          for (const c of chunks) {
+            out.set(c, offset);
+            offset += c.length;
+          }
+          arrayBuffer = out.buffer;
+        } catch (er) {
+          console.error('Error reading ReadableStream via reader', er);
+        }
+      }
+    } else if (typeof raw === 'string') {
+      // maybe base64 already
+      // try to detect data: prefix
+      if (raw.startsWith('data:')) return { dataUrl: raw, sha256: '' } as any;
+      // else treat as url
+      const resp = await fetch(raw);
+      if (!resp.ok) return null;
+      arrayBuffer = await resp.arrayBuffer();
+    } else if (raw && raw.data) {
+      // Buffer-like
+      try {
+        arrayBuffer = Uint8Array.from(raw.data).buffer;
+      } catch (e) {}
+    }
+
+    if (!arrayBuffer) {
+      console.error('Unable to convert downloaded file to ArrayBuffer', raw);
+      return null;
+    }
+
+    const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+    const sha256 = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+    // convert to base64 data url
+    const uint8 = new Uint8Array(arrayBuffer);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < uint8.length; i += chunkSize) {
+      const chunk = uint8.subarray(i, i + chunkSize);
+      let chunkStr = '';
+      for (let j = 0; j < chunk.length; j++) chunkStr += String.fromCharCode(chunk[j]);
+      binary += chunkStr;
+    }
+    const base64 = btoa(binary);
+    // default mime unknown; caller may override
+    const dataUrl = `data:application/octet-stream;base64,${base64}`;
+    return { dataUrl, sha256 };
+  } catch (e) {
+    console.error('fetchGeneratedFileAsDataUrl error', e);
+    return null;
+  }
 }
 async function createAgent() {
     const client = new Mistral({apiKey: getApiKey()});
@@ -124,17 +266,16 @@ async function getAgent() {
 
 
 
-async function updateAgent(thread: Thread, userMessage : Message, librariesId : string[]) {
+async function updateAgent(thread: Thread, userMessage : Message, librariesId : string[], imageGeneration : boolean = false) {
     const client = new Mistral({apiKey: getApiKey()});
     
     const text = String(userMessage?.text ?? '').trim();
 
     const codeRegex = /```|(?:\b(?:code|script|javascript|typescript|python|java|c\+\+|cpp|c#|csharp|ruby|go|rust|bash|shell|sh|dockerfile|sql|query|compile|execute|run|debug|stack trace|traceback|function\s+\w+|class\s+\w+)\b)/i;
-    const imageRegex = /\b(image|picture|photo|generate image|create image|render|illustration|draw|logo|portrait|avatar|icon|png|jpg|jpeg|svg|midjourney|dalle|stable diffusion|sdxl)\b/i;
-    
+
     const needCodeInterpreter: boolean = codeRegex.test(text);
-    const needWebSearch: boolean = true;
-    const needImageGeneration: boolean = imageRegex.test(text);
+    const needWebSearch: boolean = imageGeneration ? false : true;
+    const needImageGeneration: boolean = imageGeneration;
     const needFileTool: boolean = librariesId.length > 0;
 
     let agent = await getAgent();
@@ -166,10 +307,10 @@ async function updateAgent(thread: Thread, userMessage : Message, librariesId : 
     
 }
 
-async function runAgent(thread: Thread, userMessage: Message, messagesList: any[] = []) {
+async function runAgent(thread: Thread, userMessage: Message, messagesList: any[] = [], imageGeneration : boolean = false) {
     if (!(await existAgent())) await createAgent();
     let librariesId = await getLibrariesId(userMessage);
-    const updatedAgent = await updateAgent(thread, userMessage, librariesId ?? []);
+    const updatedAgent = await updateAgent(thread, userMessage, librariesId ?? [], imageGeneration);
     if (!updatedAgent || !updatedAgent.id) {
         console.error('No agent available to start the conversation. Aborting start call.', { updatedAgent });
         return { chatResponse: null, attachmentId: librariesId ?? null };
@@ -201,8 +342,18 @@ async function runAgent(thread: Thread, userMessage: Message, messagesList: any[
 
 
 
-export async function handleMessageSend(thread: Thread, content: string, selectedFiles: File[] = []) {
-    try { cleanupCancelledMessages(thread, true); } catch (e) {}
+export async function handleMessageSend(thread: Thread, content: string, selectedFiles: File[] = [], imageGeneration : boolean = false) {
+  try { cleanupCancelledMessages(thread, true); } catch (e) {}
+  // Validate API key before proceeding
+  try {
+    const key = getApiKey();
+    const ok = key ? await (await import('./ApiKey')).isValidApiKey(key) : false;
+    if (!ok) {
+      try { showErrorToast('Clé API manquante ou invalide — ouverture des paramètres.'); } catch (e) {}
+  try { window.dispatchEvent(new CustomEvent('openModelSettings', { detail: { panel: 'modele' } } as any)); } catch (e) {}
+      return;
+    }
+  } catch (e) {}
     const lastMessage = getLastMessage(thread);
     const history = getHistory(thread, lastMessage);
     const attachments = await generateAttachmentFromFiles(selectedFiles);
@@ -247,19 +398,20 @@ export async function handleMessageSend(thread: Thread, content: string, selecte
         ];
 
     
-    const { chatResponse } = await runAgent(thread, userMessage, messagesList);
-
-    // If the request was cancelled, activeRequests entry will have been removed by cancelActiveRequest
+    const { chatResponse } = await runAgent(thread, userMessage, messagesList, imageGeneration);
     if (!activeRequests.has(thread.id)) return;
     if (!chatResponse || !chatResponse.outputs || chatResponse.outputs.length === 0) {
         newMessage.text = `<p class='text-red-500'>${chatResponse.detail[0].msg}</p>`;
         newMessage.thinking = "";
+        userMessage.status = 'cancelled';
+        newMessage.status = 'cancelled';
         return;
     }
-    const { thinking, texts } = extractThinkingAndText(chatResponse);
-    console.log('Thinking:', thinking, 'Texts:', texts);
-    newMessage.text = texts.join('\n');
+    const { thinking, images } = extractThinkingAndText(chatResponse);
+    console.log('Thinking:', thinking, 'OrderedContent:', images);
     newMessage.thinking = thinking.join('\n');
+    newMessage.text = '';
+    await renderOrderedContentToMessage(images, newMessage);
     updateThreadCache(thread);
         
     updateActualThread();
@@ -276,8 +428,18 @@ export async function handleMessageSend(thread: Thread, content: string, selecte
     try { activeRequests.delete(thread.id); } catch (e) {}
 }
 
-export async function handleRegenerateMessage(thread : Thread, message: Message, model : string) {
-    if (message.sender !== 'assistant') return;
+export async function handleRegenerateMessage(thread : Thread, message: Message, model : string, imageGeneration : boolean = false) {
+  // Validate API key before proceeding
+  try {
+    const key = getApiKey();
+    const ok = key ? await (await import('./ApiKey')).isValidApiKey(key) : false;
+    if (!ok) {
+      try { showErrorToast('Clé API manquante ou invalide — ouverture des paramètres.'); } catch (e) {}
+  try { window.dispatchEvent(new CustomEvent('openModelSettings', { detail: { panel: 'modele' } } as any)); } catch (e) {}
+      return;
+    }
+  } catch (e) {}
+  if (message.sender !== 'assistant') return;
     if (!thread || !message) return;
     // Remove any cancelled assistant messages for this thread before regenerating.
     try { cleanupCancelledMessages(thread, false); } catch (e) {}
@@ -308,17 +470,21 @@ export async function handleRegenerateMessage(thread : Thread, message: Message,
             
             ...history,
         ];
-    const { chatResponse, attachmentId } = await runAgent(thread, userMessage, messagesList);
+    const { chatResponse, attachmentId } = await runAgent(thread, userMessage, messagesList, imageGeneration);
     console.log(chatResponse);
     if (!activeRequests.has(thread.id)) return;
     if (!chatResponse || !chatResponse.outputs || chatResponse.outputs.length === 0) {
-        newMessage.text = "Error: no response";
+        newMessage.text = `<p class='text-red-500'>${chatResponse.detail[0].msg}</p>`;
         newMessage.thinking = "";
+        newMessage.status = 'cancelled';
         return;
     }
-    const { thinking, texts } = extractThinkingAndText(chatResponse);
-    newMessage.text = texts.join('\n');
-    newMessage.thinking = thinking.join('\n');
+  const { thinking, images } = extractThinkingAndText(chatResponse);
+  // Render ordered content (interleaved text and images) into the message
+  newMessage.text = '';
+  await renderOrderedContentToMessage(images, newMessage);
+  newMessage.thinking = thinking.join('\n');
+  // images already rendered and attached by renderOrderedContentToMessage
     updateThreadCache(thread);
     updateActualThread();
     if ((thread.status as any) !== 'remote') {
@@ -335,10 +501,20 @@ export async function handleRegenerateMessage(thread : Thread, message: Message,
     return newMessage;    
 }
 
-export async function handleEditMessage(thread : Thread, message: Message, editMessage : string) {
-    if (message.sender !== 'user') return;
+export async function handleEditMessage(thread : Thread, message: Message, editMessage : string, imageGeneration : boolean = false) {
+  // Validate API key before proceeding
+  try {
+    const key = getApiKey();
+    const ok = key ? await (await import('./ApiKey')).isValidApiKey(key) : false;
+    if (!ok) {
+      try { showErrorToast('Clé API manquante ou invalide — ouverture des paramètres.'); } catch (e) {}
+  try { window.dispatchEvent(new CustomEvent('openModelSettings', { detail: { panel: 'modele' } } as any)); } catch (e) {}
+      return;
+    }
+  } catch (e) {}
+
+  if (message.sender !== 'user') return;
     if (!thread || !message) return;
-    // Remove cancelled assistant messages and their parent user messages before performing an edit-based resend.
     try { cleanupCancelledMessages(thread, true); } catch (e) {}
     const msgs = thread.messages ?? [];
     const parentId = message.parentId ?? null;
@@ -383,17 +559,21 @@ export async function handleEditMessage(thread : Thread, message: Message, editM
             
         
         ];
-    const { chatResponse, attachmentId } = await runAgent(thread, newUserMessage, messagesList);
+    const { chatResponse, attachmentId } = await runAgent(thread, newUserMessage, messagesList, imageGeneration);
     console.log(chatResponse);
     if (!activeRequests.has(thread.id)) return;
     if (!chatResponse || !chatResponse.outputs || chatResponse.outputs.length === 0) {
-        newMessage.text = "Error: no response";
+        newMessage.text = `<p class='text-red-500'>${chatResponse.detail[0].msg}</p>`;
         newMessage.thinking = "";
+        newMessage.status = 'cancelled';
+        newUserMessage.status = 'cancelled';
         return;
     }
-    const { thinking, texts } = extractThinkingAndText(chatResponse);
-    newMessage.text = texts.join('\n');
-    newMessage.thinking = thinking.join('\n');
+  const { thinking, images } = extractThinkingAndText(chatResponse);
+  newMessage.text = '';
+  await renderOrderedContentToMessage(images, newMessage);
+  newMessage.thinking = thinking.join('\n');
+  // images already rendered and attached by renderOrderedContentToMessage
 
     updateActualThread();
     if ((thread.status as any) !== 'remote') {
@@ -408,4 +588,103 @@ export async function handleEditMessage(thread : Thread, message: Message, editM
         window.history.pushState({}, '', url);
     }
 
+}
+
+// Helper: fetch remote image URL and return data URL + sha256
+async function fetchImageAsDataUrl(url: string): Promise<{ dataUrl: string; sha256: string } | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    const arrayBuffer = await blob.arrayBuffer();
+    // compute sha256
+    const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+    const sha256 = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+    // convert to base64 data url
+    const uint8 = new Uint8Array(arrayBuffer);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < uint8.length; i += chunkSize) {
+      const chunk = uint8.subarray(i, i + chunkSize);
+      let chunkStr = '';
+      for (let j = 0; j < chunk.length; j++) chunkStr += String.fromCharCode(chunk[j]);
+      binary += chunkStr;
+    }
+    const base64 = btoa(binary);
+    const contentType = blob.type || 'image/png';
+    const dataUrl = `data:${contentType};base64,${base64}`;
+    return { dataUrl, sha256 };
+  } catch (e) {
+    console.error('Failed to fetch/convert image', url, e);
+    return null;
+  }
+}
+
+// Render ordered content array (texts and images) into the message: append text and attach images inline preserving order
+async function renderOrderedContentToMessage(imagesArr: any[], newMessage: Message) {
+  if (!Array.isArray(imagesArr) || imagesArr.length === 0) return;
+  for (const item of imagesArr) {
+    try {
+      if (!item) continue;
+      if (item.type === 'text') {
+        // append with two newlines separation to mimic previous behavior
+        newMessage.text = `${newMessage.text}${newMessage.text ? '\n\n' : ''}${String(item.text ?? '')}`;
+        continue;
+      }
+      if (item.type === 'image') {
+        const filename = item.filename ?? item.fileName ?? item.name ?? item.filename ?? item.fileName ?? `mistral_image_${Date.now()}.png`;
+        const mime = item.mime ?? item.fileType ?? item.file_type ?? 'image/png';
+        let dataField = '';
+        let sha = '';
+
+        if (item.fileId) {
+          const fetched = await fetchGeneratedFileAsDataUrl(item.fileId);
+          if (fetched) {
+            dataField = fetched.dataUrl;
+            sha = fetched.sha256;
+          } else {
+            // skip this image if cannot fetch
+            continue;
+          }
+        } else {
+          const source = item.data ?? item.url ?? null;
+          if (!source) continue;
+          if (typeof source === 'string' && source.startsWith('data:')) {
+            dataField = source;
+          } else if (typeof source === 'string' && (source.startsWith('http://') || source.startsWith('https://'))) {
+            const fetched = await fetchImageAsDataUrl(source);
+            if (fetched) {
+              dataField = fetched.dataUrl;
+              sha = fetched.sha256;
+            } else {
+              dataField = `url:${source}`;
+            }
+          } else {
+            dataField = String(source);
+          }
+        }
+
+        const attachment = ({
+          fileName: filename,
+          fileType: mime,
+          type: 'image' as const,
+          status: 'local' as const,
+          data: {
+            sha256: sha,
+            data: dataField
+          }
+        } as any);
+        newMessage.attachments = [...(newMessage.attachments ?? []), attachment];
+        // append markdown image reference inline
+        try {
+          const mdSrc = dataField && typeof dataField === 'string' && dataField.startsWith('data:') ? dataField : (dataField && typeof dataField === 'string' && dataField.startsWith('url:') ? dataField.slice(4) : dataField);
+          if (mdSrc) {
+            newMessage.text = `${newMessage.text}${newMessage.text ? '\n\n' : ''}![${filename}](${mdSrc})`;
+          }
+        } catch (e) {}
+      }
+    } catch (e) {
+      console.error('Error rendering ordered content', e);
+    }
+  }
 }

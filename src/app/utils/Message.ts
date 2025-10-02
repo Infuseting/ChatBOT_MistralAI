@@ -122,7 +122,7 @@ export function getHistory(thread: Thread, lastMessage?: Message | null, limit: 
             
 
         }
-        
+        console.log(history);
         
         return history.reverse();
         

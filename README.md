@@ -186,8 +186,9 @@ High-level endpoints (see `src/app/api`):
 | Email Login |  ✅ | ✅ | ✅ |
 | Model Features Viewer |  ✅ | ✅ | ✅ |
 | File Input | ✅ | ✅ | ✅ |
-| Image OCR | ❌ | ❌ | ❌ |
+| Image OCR | ✅ | ✅ | ✅ |
 | Audio Call | ❌ | ❌ | ❌ |
+| Image Generation | ✅ | ✅ | ✅ |
 | Video Call | ❌ | ❌ | ❌ |
 | Access without login | ❌ | ❌ | ❌ |
 | Subthread | ❌ | ❌ | ❌ |

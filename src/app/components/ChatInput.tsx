@@ -1,7 +1,7 @@
 "use client"
 import React, { useEffect, useRef, useId, useState } from 'react';
 import { cancelActiveRequest, isRequestActive } from '../utils/DynamicMessage';
-import { FaPlus, FaMicrophone, FaPaperPlane } from 'react-icons/fa';
+import { FaPlus, FaMicrophone, FaPaperPlane, FaImage } from 'react-icons/fa';
 import { showErrorToast, showSuccessToast } from "../utils/toast";
 import { Thread } from '../utils/Thread';
 import { FaTimes } from 'react-icons/fa';
@@ -16,8 +16,7 @@ type Props = {
     actualThread: Thread | null;
     isNewestBranch: boolean;
     isShareThread: boolean;
-    // handler requires a non-null Thread. May receive optional files array
-    handleMessageSend: (thread: Thread, value: string, files?: File[]) => Promise<void> | void;
+    handleMessageSend: (thread: Thread, value: string, files?: File[], imageGeneration?: boolean) => Promise<void> | void;
 };
 
 export default function ChatInput({ actualThread, isNewestBranch, isShareThread, handleMessageSend }: Props) {
@@ -27,7 +26,7 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
     const textInputId = `chat-input-${uid}`;
     type SelectedFile = { file: File; previewUrl?: string };
     const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
-    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [imageGenerationMode, setImageGenerationMode] = useState(false);
 
     const MAX_FILES = 10;
     const MAX_SIZE = 8 * 1024 * 1024; // 8 MB
@@ -64,7 +63,7 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
                 prev.forEach(p => { if (p.previewUrl) URL.revokeObjectURL(p.previewUrl); });
                 return [];
             });
-            await handleMessageSend(actualThread, value, files.map(sf => sf.file));
+            await handleMessageSend(actualThread, value, files.map(sf => sf.file), imageGenerationMode);
             
             const el = e.currentTarget as HTMLTextAreaElement;
             el.style.height = `${el.scrollHeight}px`;
@@ -89,7 +88,7 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
             prev.forEach(p => { if (p.previewUrl) URL.revokeObjectURL(p.previewUrl); });
             return [];
         });
-        await handleMessageSend(actualThread, value, files.map(sf => sf.file));
+        await handleMessageSend(actualThread, value, files.map(sf => sf.file), imageGenerationMode);
         // clear selected files after sending
     }
     // Handle file input change
@@ -115,7 +114,6 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
         if (selectedFiles.length + newFiles.length > MAX_FILES) {
             const allowed = Math.max(0, MAX_FILES - selectedFiles.length);
             const msg = `Vous pouvez sélectionner au maximum ${MAX_FILES} fichiers (il reste ${allowed}).`;
-            setErrorMessage(msg);
             showErrorToast(msg);
             e.currentTarget.value = '';
             return;
@@ -126,13 +124,11 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
         if (oversized.length > 0) {
             const names = oversized.map(sf => sf.file.name).join(', ');
             const msg = `Les fichiers suivants dépassent la taille maximale de 8MB: ${names}`;
-            setErrorMessage(msg);
             showErrorToast(msg);
             e.currentTarget.value = '';
             return;
         }
         setSelectedFiles(prev => [...prev, ...newFiles]);
-        setErrorMessage(null);
         e.currentTarget.value = '';
     }
     // Handle microphone button click (stub)
@@ -260,29 +256,23 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
             </div>
             <div className='flex w-full justify-between mt-2'>
             
-                <div className="flex-shrink-0">
+                <div className="flex-shrink-0 flex flex-row">
                     <label htmlFor={fileInputId} className="flex items-center justify-center w-10 h-10 hover:bg-gray-600 text-white rounded-md cursor-pointer select-none" title="Add files" aria-label="Add files">
                         <FaPlus className="w-5 h-5" />
                     </label>
                     <input id={fileInputId} type="file" multiple className="hidden" onChange={onFileChange} />
+                    <button type="button" className={`flex items-center justify-center w-10 h-10 ${imageGenerationMode ? 'bg-gray-500' : ''} hover:bg-gray-600 text-white rounded-md`} title="Generate image" aria-label="Generate image" onClick={() => setImageGenerationMode(prev => !prev)}>
+                        <FaImage className="w-5 h-5" />
+                    </button>
                 </div>
                 <div className="flex-shrink-0 flex items-center 2xl:space-x-2 xl:space-x-2 lg:space-x-2 md:space-x-2">
                     <button type="button" className="flex items-center justify-center w-10 h-10  hover:bg-gray-600 text-white rounded-md" title="Record voice" aria-label="Record voice" onClick={onMicClick}>
                         <FaMicrophone className="w-5 h-5" />
                     </button>
 
-                    {
-                        
-                    }
-                    { actualThread && isRequestActive(actualThread.id) ? (
-                        <button type="button" className="flex items-center justify-center px-3 h-10  hover:bg-red-600 text-white rounded-md" title="Cancel request" aria-label="Cancel request" onClick={() => { try { cancelActiveRequest(actualThread.id); } catch (e) {} }}>
-                            <FaTimes className="w-5 h-5" />
-                        </button>
-                    ) : (
-                        <button type="button" className="flex items-center justify-center px-3 h-10  hover:bg-indigo-500 text-white rounded-md" title="Send message" aria-label="Send message" disabled={!isNewestBranch || isShareThread} onClick={onSendClick}>
-                            <FaPaperPlane className="w-5 h-5" />
-                        </button>
-                    ) }
+                    <button type="button" className="flex items-center justify-center px-3 h-10  hover:bg-indigo-500 text-white rounded-md" title="Send message" aria-label="Send message" disabled={!isNewestBranch || isShareThread} onClick={onSendClick}>
+                        <FaPaperPlane className="w-5 h-5" />
+                    </button>
                 </div>
             </div>
         </div>

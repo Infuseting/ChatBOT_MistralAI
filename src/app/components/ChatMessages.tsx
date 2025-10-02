@@ -74,6 +74,7 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
     const [regenSubmenuOpenFor, setRegenSubmenuOpenFor] = useState<string | null>(null);
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
     const [editingText, setEditingText] = useState<string>('');
+    const [editingImageGeneration, setEditingImageGeneration] = useState<boolean>(false);
     const [editingSubmitting, setEditingSubmitting] = useState<boolean>(false);
     const [openThinkingFor, setOpenThinkingFor] = useState<string | null>(null);
     const editingTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -550,7 +551,7 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
                                         setEditingSubmitting(true);
                                         try {
                                             m.text = editingText;
-                                            await handleEditMessage(thread, m, editingText);
+                                            await handleEditMessage(thread, m, editingText, editingImageGeneration);
                                             const synced = m.id ? await waitForMessageResync(m.id) : null;
                                             if (synced) {
                                                 jumpToMessage(synced);
@@ -624,7 +625,8 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
                                                         try {
                                                             setRegenMenuOpenFor(null);
                                                             const usedModel = thread.model || getActualModel();
-                                                            const message = await handleRegenerateMessage(thread, m, usedModel);
+                                                            const isImageGen = typeof m.thinking === 'string' && m.thinking.includes('Tool: image_generation');
+                                                            const message = await handleRegenerateMessage(thread, m, usedModel, isImageGen);
                                                             const synced = message && message.id ? await waitForMessageResync(message.id) : null;
                                                             if (synced) jumpToMessage(synced);
                                                             else { await updateThreadMessages(); message && jumpToMessage(message); }
@@ -640,7 +642,8 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
                                                                         try {
                                                                             setRegenMenuOpenFor(null);
                                                                             setRegenSubmenuOpenFor(null);
-                                                                            const message = await handleRegenerateMessage(thread, m, fm);
+                                                                            const isImageGen = typeof m.thinking === 'string' && m.thinking.includes('Tool: image_generation');
+                                                                            const message = await handleRegenerateMessage(thread, m, fm, isImageGen);
                                                                             const synced = message && message.id ? await waitForMessageResync(message.id) : null;
                                                                             if (synced) jumpToMessage(synced);
                                                                             else { await updateThreadMessages(); message && jumpToMessage(message); }
@@ -663,12 +666,16 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
                                             )}
                                             {editingMessageId === m.id ? (
                                                 <div className="flex items-center space-x-2 mx-2">
+                                                    <label className="inline-flex items-center space-x-2 text-sm">
+                                                        <input type="checkbox" checked={editingImageGeneration} onChange={(e) => setEditingImageGeneration(e.target.checked)} className="form-checkbox" />
+                                                        <span>Générer des images</span>
+                                                    </label>
                                                     <button disabled={editingSubmitting} className={`px-3 py-1 rounded bg-indigo-600 text-white ${editingSubmitting ? 'opacity-50' : ''}`} onClick={async () => {
                                                         if (editingSubmitting) return;
                                                         setEditingSubmitting(true);
                                                         try {
                                                             m.text
-                                                            await handleEditMessage(thread, m, editingText );
+                                                            await handleEditMessage(thread, m, editingText, editingImageGeneration );
                                                             const synced = m.id ? await waitForMessageResync(m.id) : null;
                                                             if (synced) {
                                                                 jumpToMessage(synced);
@@ -682,9 +689,10 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
                                                             setEditingSubmitting(false);
                                                             setEditingMessageId(null);
                                                             setEditingText('');
+                                                            setEditingImageGeneration(false);
                                                         }
                                                     }}>Envoyer</button>
-                                                    <button title="Annuler" className="px-2 py-1 rounded bg-gray-600 text-white" onClick={() => { setEditingMessageId(null); setEditingText(''); }}><FaTimes /></button>
+                                                    <button title="Annuler" className="px-2 py-1 rounded bg-gray-600 text-white" onClick={() => { setEditingMessageId(null); setEditingText(''); setEditingImageGeneration(false); }}><FaTimes /></button>
                                                 </div>
                                             ) : (
                                                 <FaEdit title="Edit" className={`hover:text-white cursor-pointer mx-2`} onClick={async () => {
@@ -695,6 +703,21 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
                                                         }
                                                         setEditingMessageId(m.id ?? null);
                                                         setEditingText(m.text ?? '');
+                                                        // Default the image-generation toggle based on whether the latest child message
+                                                        // of this message contains a Tool: image_generation entry in its thinking.
+                                                        try {
+                                                            const children = childrenMap.get(m.id) ?? [];
+                                                            let defaultImageGen = false;
+                                                            if (Array.isArray(children) && children.length > 0) {
+                                                                const lastChild = children[children.length - 1];
+                                                                if (lastChild && typeof lastChild.thinking === 'string' && lastChild.thinking.includes('Tool: image_generation')) {
+                                                                    defaultImageGen = true;
+                                                                }
+                                                            }
+                                                            setEditingImageGeneration(defaultImageGen);
+                                                        } catch (e) {
+                                                            setEditingImageGeneration(false);
+                                                        }
                                                     } catch (e) {
                                                     }
                                                 }} />

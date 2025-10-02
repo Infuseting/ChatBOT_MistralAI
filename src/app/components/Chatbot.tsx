@@ -11,6 +11,7 @@ import SystemContextModal from "./SystemContextModal";
 import { getActualModel, getAvailableModelList, getFastModelList, setActualModel } from '../utils/Models';
 import ChatMessages from "./ChatMessages";
 import ChatInput from './ChatInput';
+import DownloadHandler from './DownloadHandler';
 
 
 export default function Chatbot() {
@@ -186,6 +187,7 @@ export default function Chatbot() {
 
   return (
      <div className="w-full h-full bg-gray-700">
+          <DownloadHandler />
         <div className="absolute top-0 flex flex-row z-80 right-0 m-4 space-x-2">
             <motion.div onClick={handleShare} className="flex bg-gray-800 p-2 text-white rounded-lg shadow-lg cursor-pointer" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                 <IoMdShareAlt className="w-6 h-6" />

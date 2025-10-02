@@ -216,11 +216,29 @@ export function parseImageMarkdown(text : string ) {
 
     // Replace image markdown occurrences: ![alt](src) or <img src="..."> occurrences
     // Handle markdown images first
-    const imgMdRegex = /(!\[[^\]]*\]\()([^ )]+)(\))/g;
-    let out = text.replace(imgMdRegex, (full, pre, src, post) => {
+    const imgMdRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+    // We'll render Tailwind-based wrappers/buttons so we don't inject raw <style> blocks.
+    const downloadSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 11l5 5 5-5M12 4v12"/></svg>`;
+
+    const escapeHtml = (s: string) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    let out = text.replace(imgMdRegex, (full, alt, src) => {
         try {
             const fixed = normalizeSrc(src);
-            return `${pre}${fixed}${post}`;
+            const altEsc = escapeHtml(alt ?? 'image');
+            // Single download button styled like the share button
+            const downloadBtn = `
+                <div class="absolute top-2 right-2">
+                    <button type="button" onclick="window.__mistral_download_image && window.__mistral_download_image(event)" class="flex bg-gray-800 p-2 text-white rounded-lg shadow-lg cursor-pointer" aria-label="Download image">
+                        ${downloadSvg}
+                    </button>
+                </div>
+            `;
+            const wrapper = `<div class="mistral-image-wrapper group inline-block relative">` +
+                `<img src="${fixed}" alt="${altEsc}" class="block max-w-full h-auto" />` +
+                `${downloadBtn}` +
+                `</div>`;
+            return wrapper;
         } catch (e) {
             return full;
         }
@@ -230,11 +248,27 @@ export function parseImageMarkdown(text : string ) {
     out = out.replace(/(<img[^>]*src=["'])([^"']+)(["'][^>]*>)/g, (full, a, src, b) => {
         try {
             const fixed = normalizeSrc(src);
-            return `${a}${fixed}${b}`;
+            // Try to extract alt attribute if present
+            let altMatch = full.match(/alt=["']([^"']*)["']/i);
+            const alt = altMatch ? altMatch[1] : '';
+            const altEsc = escapeHtml(alt);
+            const downloadBtn = `
+                <div class="absolute top-2 right-2">
+                    <button type="button" onclick="window.__mistral_download_image && window.__mistral_download_image(event)" class="flex bg-gray-800 p-2 text-white rounded-lg shadow-lg cursor-pointer" aria-label="Download image">
+                        ${downloadSvg}
+                    </button>
+                </div>
+            `;
+            const wrapper = `<div class="mistral-image-wrapper group inline-block relative">` +
+                `<img src="${fixed}" alt="${altEsc}" class="block max-w-full h-auto" />` +
+                `${downloadBtn}` +
+                `</div>`;
+            return wrapper;
         } catch (e) {
             return full;
         }
     });
 
-    return out;
+            // Return HTML string; the download handler is registered in a client component (DownloadHandler) to avoid inline scripts.
+            return out;
 }

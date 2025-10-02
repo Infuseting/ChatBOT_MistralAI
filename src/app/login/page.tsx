@@ -26,7 +26,7 @@ function LoginInner({ redirectUrl }: { redirectUrl: string | null }) {
             setError('No token returned by Google.');
             return;
         }
-
+        console.log('Google access_token', access_token);
         try {
             const res = await fetch('/api/auth/google/token', {
                 method: 'POST',

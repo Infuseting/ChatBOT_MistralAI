@@ -25,13 +25,31 @@ export async function POST(request: Request) {
 
     // Verify access_token with Google's tokeninfo endpoint
     const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(access_token)}`);
+
     if (!verifyRes.ok) return NextResponse.json({ error: 'Invalid access_token' }, { status: 401 });
     const payload = await verifyRes.json();
+    let sub = payload.sub as string | undefined; // Google subject (unique id)
+    let email = payload.email as string | undefined;
+    let name = payload.name as string | undefined;
+    let picture = payload.picture as string | undefined;
 
-    const sub = payload.sub as string | undefined; // Google subject (unique id)
-    const email = payload.email as string | undefined;
-    const name = payload.name as string | undefined;
-    const picture = payload.picture as string | undefined;
+    // If tokeninfo doesn't return profile fields like name or picture, fetch the userinfo endpoint as a fallback
+    if ((!name || !picture) && access_token) {
+      try {
+        const userinfoRes = await fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${encodeURIComponent(access_token)}`);
+        if (userinfoRes.ok) {
+          const ui = await userinfoRes.json();
+          // Only overwrite missing fields
+          if (!name && ui.name) name = ui.name as string;
+          if (!picture && (ui.picture || ui.avatar)) picture = (ui.picture || ui.avatar) as string;
+          if (!email && ui.email) email = ui.email as string;
+        } else {
+          console.log('Google userinfo fallback failed', userinfoRes.status, await userinfoRes.text());
+        }
+      } catch (e) {
+        console.error('Error fetching Google userinfo fallback', e);
+      }
+    }
 
     if (!sub) return NextResponse.json({ error: 'Invalid token payload' }, { status: 400 });
 
@@ -42,16 +60,14 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Account exists with different sign-in method' }, { status: 400 });
       }
     }
+    const updateData: any = { provider: 'GOOGLE' };
+    if (typeof name !== 'undefined' && name !== null) updateData.name = name;
+    if (typeof email !== 'undefined' && email !== null) updateData.email = email;
+    if (typeof picture !== 'undefined' && picture !== null) updateData.avatar = picture;
 
-    // Upsert user by googleId and ensure provider is set to 'GOOGLE'
     const user = await prisma.user.upsert({
       where: { googleId: sub },
-      update: {
-        name: name ?? undefined,
-        email: email ?? undefined,
-        avatar: picture ?? undefined,
-        provider: 'GOOGLE',
-      },
+      update: updateData,
       create: {
         name: name ?? 'No name',
         email: email ?? undefined,

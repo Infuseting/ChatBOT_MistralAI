@@ -2,7 +2,7 @@
 import { IoMdSettings, IoMdShareAlt } from "react-icons/io";
 import { motion } from "motion/react";
 import { getActualThread, getShareLink, Thread, updateServerThread } from "../utils/Thread";
-import { handleMessageSend } from "../utils/Agent";
+import { handleMessageSend, handleAudioSend } from "../utils/Agent";
 import { showErrorToast, showSuccessToast } from "../utils/toast";
 import { useState, useRef, useEffect } from "react";
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/react-dom';
@@ -43,6 +43,42 @@ export default function Chatbot() {
     const dropdownTriggerRef = useRef<HTMLElement | null>(null);
     const dropdownElRef = useRef<HTMLElement | null>(null);
     const messagesWrapperRef = useRef<HTMLDivElement | null>(null);
+
+    // Adapter: ChatInput expects a (thread, value: string) => Promise<void>,
+    // while utils/Agent.handleAudioSend expects a Blob; convert string -> Blob.
+    async function handleAudioSendWrapper(thread: Thread, value: string | Blob) {
+        try {
+            // If we received a Blob (new flow), forward it directly.
+            if (value instanceof Blob) {
+                return handleAudioSend(thread, value);
+            }
+
+            // Otherwise value is a string. If it's a data URL, convert base64 payload to Blob
+            const str = value as string;
+            const dataUrlMatch = str.match(/^data:(.+);base64,(.*)$/);
+            if (dataUrlMatch) {
+                const mime = dataUrlMatch[1];
+                const b64 = dataUrlMatch[2];
+                const binary = atob(b64);
+                const len = binary.length;
+                const u8 = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                    u8[i] = binary.charCodeAt(i);
+                }
+                const blob = new Blob([u8], { type: mime });
+                return handleAudioSend(thread, blob);
+            }
+
+            // Otherwise try to fetch it (handles blob: or remote URLs)
+            const res = await fetch(str);
+            const blob = await res.blob();
+            return handleAudioSend(thread, blob);
+        } catch (err) {
+            console.error('Failed to send audio', err);
+            showErrorToast('Failed to send audio');
+        }
+    }
+
     async function handleShare() {
         // Share the current thread by requesting a share link from the server
         // If the thread is already marked as shared, sharing is disabled.
@@ -227,9 +263,9 @@ export default function Chatbot() {
                             </div>
                         </div>
 
-                        <button onClick={() => { setContextModalOpen(true); setDropdownMenuOpen(false); }} className="w-full text-left p-2 hover:bg-gray-700">Modify Context</button>
-                        <div className="border-t border-gray-700" />
-                        <button onClick={() => { console.log("delete thread"); setDropdownMenuOpen(false); }} className="w-full text-left p-2 text-red-500 hover:bg-gray-700">Delete Thread</button>
+                        <div className="flex items-center space-x-2 bg-gray-800 rounded-md shadow-lg w-full p-4">
+                            <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} handleAudioSend={handleAudioSendWrapper} />
+                        </div>
                     </div>
                 )}
             </div>
@@ -237,9 +273,6 @@ export default function Chatbot() {
             {contextModalOpen && <SystemContextModal onClose={() => setContextModalOpen(false)} />}
 
         </div>
-        <div className="h-full">
-        <span aria-hidden="true" style={{ display: 'none' }}>{String(refreshToggle)}</span>
-    
         {  
             /* Rendering branches:
                - If no thread selected: show placeholder text
@@ -258,7 +291,7 @@ export default function Chatbot() {
                     </div>
                     <div className="bg-gray-700 pointer-events-auto mx-auto w-full 2xl:max-w-6xl xl:max-w-4xl lg:max-w-3xl md:max-w-2xl sm:max-w-lg max-w-80 p-4 pt-0">
                         <div className="flex items-center space-x-2 bg-gray-800 rounded-md shadow-lg w-full p-4">
-                            <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} />
+                            <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} handleAudioSend={handleAudioSendWrapper} />
                         </div>
                     </div>
                 </div>
@@ -269,7 +302,7 @@ export default function Chatbot() {
                         <div className="w-[calc(100%_-_2.5rem)] 2xl:max-w-6xl xl:max-w-4xl lg:max-w-3xl md:max-w-2xl sm:max-w-lg max-w-80 max-h-90 rounded-md p-4 mx-auto bg-gray-800">
                             <div className="flex flex-1 items-center">
                                 {/* Empty-thread input area (still uses ChatInput) */}
-                                <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} />
+                                <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} handleAudioSend={handleAudioSendWrapper} />
                             </div>
                         </div>
                     </div>
@@ -280,6 +313,6 @@ export default function Chatbot() {
             
         }
         </div>
-     </div>
+     
     );
 }

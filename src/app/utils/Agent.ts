@@ -13,6 +13,9 @@ import { createServerThread, syncServerThread } from "./Thread";
 import { generateUUID } from "./crypto";
 import { generateAttachmentFromFiles, getLibrariesId } from "./Attachments";
 import { showErrorToast } from './toast';
+import { playTTSForText } from "./useAudioAnalyzer";
+
+
 function extractThinkingAndText(response: any) {
   const thinking: string[] = [];
   // images will become an ordered array mixing text and image items in the order they appear
@@ -266,7 +269,7 @@ async function getAgent() {
 
 
 
-async function updateAgent(thread: Thread, userMessage : Message, librariesId : string[], imageGeneration : boolean = false) {
+async function updateAgent(thread: Thread, userMessage : Message, librariesId : string[], imageGeneration : boolean = false, audio : boolean = false) {
     const client = new Mistral({apiKey: getApiKey()});
     
     const text = String(userMessage?.text ?? '').trim();
@@ -294,12 +297,12 @@ async function updateAgent(thread: Thread, userMessage : Message, librariesId : 
     if (needCodeInterpreter) tools.push({ type: "code_interpreter" });
     if (needImageGeneration) tools.push({ type: "image_generation" });
     if (needFileTool) tools.push({ type: "document_library", libraryIds: [...librariesId] });
-
+    console.log(tools)
     const websearchAgent = await client.beta.agents.update({
         agentId: agent.id,
         agentUpdateRequest: {
             model: thread.model ?? getActualModel(),
-            instructions: thread.context || getContext() || "You are a helpful assistant.",
+            instructions: `${audio ? 'You are in a phone conversation with a human. You need to answer their questions and help them. Keep your answers short and to the point. \n\n' : ''} ${thread.context}` || getContext() || "You are a helpful assistant.",
             tools
         },
     });
@@ -307,10 +310,10 @@ async function updateAgent(thread: Thread, userMessage : Message, librariesId : 
     
 }
 
-async function runAgent(thread: Thread, userMessage: Message, messagesList: any[] = [], imageGeneration : boolean = false) {
+async function runAgent(thread: Thread, userMessage: Message, messagesList: any[] = [], imageGeneration : boolean = false, audio : boolean = false) {
     if (!(await existAgent())) await createAgent();
     let librariesId = await getLibrariesId(userMessage);
-    const updatedAgent = await updateAgent(thread, userMessage, librariesId ?? [], imageGeneration);
+    const updatedAgent = await updateAgent(thread, userMessage, librariesId ?? [], imageGeneration, audio);
     if (!updatedAgent || !updatedAgent.id) {
         console.error('No agent available to start the conversation. Aborting start call.', { updatedAgent });
         return { chatResponse: null, attachmentId: librariesId ?? null };
@@ -569,11 +572,11 @@ export async function handleEditMessage(thread : Thread, message: Message, editM
         newUserMessage.status = 'cancelled';
         return;
     }
-  const { thinking, images } = extractThinkingAndText(chatResponse);
-  newMessage.text = '';
-  await renderOrderedContentToMessage(images, newMessage);
-  newMessage.thinking = thinking.join('\n');
-  // images already rendered and attached by renderOrderedContentToMessage
+    const { thinking, images } = extractThinkingAndText(chatResponse);
+    newMessage.text = '';
+    await renderOrderedContentToMessage(images, newMessage);
+    newMessage.thinking = thinking.join('\n');
+    // images already rendered and attached by renderOrderedContentToMessage
 
     updateActualThread();
     if ((thread.status as any) !== 'remote') {
@@ -588,6 +591,111 @@ export async function handleEditMessage(thread : Thread, message: Message, editM
         window.history.pushState({}, '', url);
     }
 
+}
+
+async function getAudioTranscription(audioBlob: Blob): Promise<{ transcribeAudio: string; lang: string | null }> {
+  if (!audioBlob) return { transcribeAudio: '', lang: null };
+  const client = new Mistral({apiKey: getApiKey()});
+
+
+  const transcriptionResponse = await client.audio.transcriptions.complete({
+    model: "voxtral-mini-latest",
+    file: {
+      fileName: "audio.mp3",
+      content: audioBlob,
+    },
+    // language: "en"
+  });
+
+  if (!transcriptionResponse || !transcriptionResponse.text) {
+    return { transcribeAudio: '', lang: null };
+  }
+  return { transcribeAudio: transcriptionResponse.text, lang: transcriptionResponse.language ?? 'en' };
+}
+export async function handleAudioSend(thread: Thread, audioBlob: Blob) {
+ try { cleanupCancelledMessages(thread, true); } catch (e) {}
+  try {
+    const key = getApiKey();
+    const ok = key ? await (await import('./ApiKey')).isValidApiKey(key) : false;
+    if (!ok) {
+      try { showErrorToast('Clé API manquante ou invalide — ouverture des paramètres.'); } catch (e) {}
+  try { window.dispatchEvent(new CustomEvent('openModelSettings', { detail: { panel: 'modele' } } as any)); } catch (e) {}
+      return;
+    }
+  } catch (e) {}
+    const lastMessage = getLastMessage(thread);
+    const history = getHistory(thread, lastMessage);
+    
+    const { transcribeAudio, lang } = await getAudioTranscription(audioBlob);
+    const userMessage: Message = {
+        id: generateUUID() ?? '',
+        text: '<i>Transcription de l\'audio en cours...</i>',
+        thinking : "",
+        sender: 'user',
+    timestamp: utcNow(),
+        parentId: lastMessage?.id ?? 'root',
+        status: 'local'
+        ,
+        attachments: []
+    };
+    const newMessage: Message = {
+        id: generateUUID(),
+        text: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 50 50" class="spinner" role="img" aria-label="loading"><circle cx="25" cy="25" r="20" fill="none" stroke="#cbd5e1" stroke-width="5"/><path fill="#3b82f6" d="M25 5a1 1 0 0 1 1 1v6a1 1 0 0 1-2 0V6a1 1 0 0 1 1-1z"><animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="1s" repeatCount="indefinite"/></path></svg>',
+        thinking : '',
+        sender: 'assistant',
+    timestamp: utcNowPlus(1000),
+        parentId: userMessage?.id ?? 'root',
+        status: 'local',
+        attachments: []
+    }
+    thread.messages = [...(thread.messages ?? []), userMessage, newMessage];
+    updateThreadCache(thread);
+    try { setActualThread(thread); } catch (e) {}
+    try { updateActualThread(); } catch (e) {}
+    // Register active request so UI can offer cancellation
+    try { startActiveRequest(thread.id, newMessage.id ?? ''); } catch (e) {}
+        
+
+    const messagesList = [
+            ...history,
+            {
+                role: "user",
+                content: transcribeAudio
+            }
+        ];
+
+    
+    const { chatResponse } = await runAgent(thread, userMessage, messagesList, false, true);
+    if (!activeRequests.has(thread.id)) return;
+    if (!chatResponse || !chatResponse.outputs || chatResponse.outputs.length === 0) {
+        newMessage.text = `<p class='text-red-500'>${chatResponse.detail[0].msg}</p>`;
+        newMessage.thinking = "";
+        userMessage.status = 'cancelled';
+        newMessage.status = 'cancelled';
+        return;
+    }
+    userMessage.text = transcribeAudio;
+    const { thinking, images } = extractThinkingAndText(chatResponse);
+    console.log('Thinking:', thinking, 'OrderedContent:', images);
+    newMessage.thinking = thinking.join('\n');
+    newMessage.text = '';
+    await renderOrderedContentToMessage(images, newMessage);
+    updateThreadCache(thread);
+    try { await playTTSForText(newMessage.text); } catch (e) { console.warn('playTTSForText failed', e); }
+    updateActualThread();
+    if ((thread.status as any) !== 'remote') {
+        await createServerThread(thread);
+    }
+    await syncServerThread(thread);
+    thread.date = utcNow();
+    updateAllThreadsList(thread);
+
+
+    const url = `/${thread.id}`;
+    if (typeof window !== 'undefined' && window.history && window.history.pushState) {
+        window.history.pushState({}, '', url);
+    }
+    try { activeRequests.delete(thread.id); } catch (e) {}
 }
 
 // Helper: fetch remote image URL and return data URL + sha256
@@ -623,31 +731,41 @@ async function fetchImageAsDataUrl(url: string): Promise<{ dataUrl: string; sha2
 // Render ordered content array (texts and images) into the message: append text and attach images inline preserving order
 async function renderOrderedContentToMessage(imagesArr: any[], newMessage: Message) {
   if (!Array.isArray(imagesArr) || imagesArr.length === 0) return;
+  // ensure text is a string so concatenation works predictably
+  if (typeof newMessage.text !== 'string') newMessage.text = String(newMessage.text ?? '');
   for (const item of imagesArr) {
     try {
       if (!item) continue;
-      if (item.type === 'text') {
-        // append with two newlines separation to mimic previous behavior
-        newMessage.text = `${newMessage.text}${newMessage.text ? '\n\n' : ''}${String(item.text ?? '')}`;
+
+      // Treat anything with a text/content property as text (more tolerant)
+      const textCandidate = typeof item.text === 'string' ? item.text
+        : typeof item.content === 'string' ? item.content
+        : null;
+      if (item.type === 'text' || textCandidate) {
+        const toAppend = String(textCandidate ?? item.text ?? item.content ?? '');
+        newMessage.text = `${newMessage.text}${newMessage.text ? '\n\n' : ''}${toAppend}`;
         continue;
       }
-      if (item.type === 'image') {
-        const filename = item.filename ?? item.fileName ?? item.name ?? item.filename ?? item.fileName ?? `mistral_image_${Date.now()}.png`;
+
+      // Image-ish items: be permissive about different shapes (fileId, file_id, url, data)
+      const isImageLike = item.type === 'image' || item.type === 'image_reference' || item.type === 'image.output' || item.fileId || item.file_id || item.url || item.data;
+      if (isImageLike) {
+        const filename = item.filename ?? item.fileName ?? item.name ?? `mistral_image_${Date.now()}.png`;
         const mime = item.mime ?? item.fileType ?? item.file_type ?? 'image/png';
         let dataField = '';
         let sha = '';
 
-        if (item.fileId) {
-          const fetched = await fetchGeneratedFileAsDataUrl(item.fileId);
+        const fileId = item.fileId ?? item.file_id ?? item.file ?? null;
+        if (fileId) {
+          const fetched = await fetchGeneratedFileAsDataUrl(fileId);
           if (fetched) {
             dataField = fetched.dataUrl;
             sha = fetched.sha256;
           } else {
-            // skip this image if cannot fetch
             continue;
           }
         } else {
-          const source = item.data ?? item.url ?? null;
+          const source = item.data ?? item.base64 ?? item.url ?? item.src ?? null;
           if (!source) continue;
           if (typeof source === 'string' && source.startsWith('data:')) {
             dataField = source;
@@ -664,7 +782,7 @@ async function renderOrderedContentToMessage(imagesArr: any[], newMessage: Messa
           }
         }
 
-        const attachment = ({
+        const attachment = {
           fileName: filename,
           fileType: mime,
           type: 'image' as const,
@@ -673,15 +791,17 @@ async function renderOrderedContentToMessage(imagesArr: any[], newMessage: Messa
             sha256: sha,
             data: dataField
           }
-        } as any);
+        } as any;
         newMessage.attachments = [...(newMessage.attachments ?? []), attachment];
-        // append markdown image reference inline
+
         try {
-          const mdSrc = dataField && typeof dataField === 'string' && dataField.startsWith('data:') ? dataField : (dataField && typeof dataField === 'string' && dataField.startsWith('url:') ? dataField.slice(4) : dataField);
+          const mdSrc = typeof dataField === 'string'
+            ? (dataField.startsWith('data:') ? dataField : (dataField.startsWith('url:') ? dataField.slice(4) : dataField))
+            : '';
           if (mdSrc) {
             newMessage.text = `${newMessage.text}${newMessage.text ? '\n\n' : ''}![${filename}](${mdSrc})`;
           }
-        } catch (e) {}
+        } catch (e) { /* ignore markdown rendering errors */ }
       }
     } catch (e) {
       console.error('Error rendering ordered content', e);

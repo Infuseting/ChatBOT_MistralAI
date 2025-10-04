@@ -81,7 +81,6 @@ export function getLastMessage(thread: Thread) : Message | null | undefined {
             const m = msgs[i];
             const t = getTime(m);
             if (t > bestTime || (t === bestTime && i > bestIndex) && m.sender !== 'user') {
-                console.log('New best time', t, 'at index', i, 'New one:', m, "Old one:", msgs[bestIndex]);
                 bestTime = t;
                 bestIndex = i;
             }

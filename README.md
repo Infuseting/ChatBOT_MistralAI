@@ -107,8 +107,11 @@ npm install
 ```env
 DATABASE_URL="mysql://<username>:<password>@<url>:<port>/chatbot"
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-client-id
+TTS_API_KEY=your-tts-api-key
 NODE_ENV=development
 ```
+
+To get a valid api key for my TTS api you can [contact me](mailto:serretarthur@gmail.com) or just test by yourself with the [official website](https://chatbot.infuseting.fr) (TTS key is required to use the voice chat and video chat but you can use this program without having TTS API KEY)
 
 4. **Prisma setup (run migrations):**
 
@@ -187,7 +190,7 @@ High-level endpoints (see `src/app/api`):
 | Model Features Viewer |  ✅ | ✅ | ✅ |
 | File Input | ✅ | ✅ | ✅ |
 | Image OCR | ✅ | ✅ | ✅ |
-| Audio Call | ❌ | ❌ | ❌ |
+| Audio Call | ✅ | ✅ | ✅ |
 | Image Generation | ✅ | ✅ | ✅ |
 | Video Call | ❌ | ❌ | ❌ |
 | Access without login | ❌ | ❌ | ❌ |
@@ -195,7 +198,7 @@ High-level endpoints (see `src/app/api`):
 | Web Search | ✅ | ✅ | ✅ |
 | Keybinds | ❌ | ❌ | ❌ |
 | Comments & Docs | ✅ | ✅ | ✅ |
-
+| Project Classification | ❌ | ❌ | ❌ |
 
 ---
 

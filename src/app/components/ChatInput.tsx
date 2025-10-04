@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useId, useState } from 'react';
 import { cancelActiveRequest, isRequestActive } from '../utils/DynamicMessage';
 import { FaPlus, FaMicrophone, FaPaperPlane, FaImage } from 'react-icons/fa';
 import { showErrorToast, showSuccessToast } from "../utils/toast";
+import AudioSpectrumModal from './AudioSpectrumModal';
 import { Thread } from '../utils/Thread';
 import { FaTimes } from 'react-icons/fa';
 
@@ -17,9 +18,11 @@ type Props = {
     isNewestBranch: boolean;
     isShareThread: boolean;
     handleMessageSend: (thread: Thread, value: string, files?: File[], imageGeneration?: boolean) => Promise<void> | void;
+    // FIXED: accept both Blob and string (AudioSpectrumModal may send a Blob)
+    handleAudioSend?: (thread: Thread, value: Blob | string) => Promise<void> | void;
 };
 
-export default function ChatInput({ actualThread, isNewestBranch, isShareThread, handleMessageSend }: Props) {
+export default function ChatInput({ actualThread, isNewestBranch, isShareThread, handleMessageSend, handleAudioSend }: Props) {
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const uid = useId();
     const fileInputId = `chat-file-input-${uid}`;
@@ -27,6 +30,8 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
     type SelectedFile = { file: File; previewUrl?: string };
     const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
     const [imageGenerationMode, setImageGenerationMode] = useState(false);
+    const [showAudioModal, setShowAudioModal] = useState(false);
+    const [ttsKeyValid, setTtsKeyValid] = useState<boolean | null>(null); // null = loading, true/false = validated
 
     const MAX_FILES = 10;
     const MAX_SIZE = 8 * 1024 * 1024; // 8 MB
@@ -134,8 +139,39 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
     // Handle microphone button click (stub)
     function onMicClick() {
         if (!isNewestBranch) return;
-        console.log('Microphone pressed');
+        // Do not open if a request is active for this thread
+        try {
+            const id = actualThread?.id ?? '';
+            if (id && isRequestActive(id)) {
+                showErrorToast('Une requête est en cours — veuillez patienter');
+                return;
+            }
+        } catch (e) {
+            // if isRequestActive not available or errors, fallback to allowing
+        }
+        setShowAudioModal(true);
     }
+
+    // Check server-side TTS API key validity on mount
+    useEffect(() => {
+        let mounted = true;
+        (async () => {
+            try {
+                const res = await fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ validate: true }) });
+                if (!mounted) return;
+                if (!res.ok) {
+                    setTtsKeyValid(false);
+                    return;
+                }
+                const json = await res.json().catch(() => ({}));
+                setTtsKeyValid(Boolean(json?.ok));
+            } catch (e) {
+                if (!mounted) return;
+                setTtsKeyValid(false);
+            }
+        })();
+        return () => { mounted = false; };
+    }, []);
     // Remove a selected file by index
     function removeFile(index: number) {
         setSelectedFiles(prev => {
@@ -266,15 +302,19 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
                     </button>
                 </div>
                 <div className="flex-shrink-0 flex items-center 2xl:space-x-2 xl:space-x-2 lg:space-x-2 md:space-x-2">
-                    <button type="button" className="flex items-center justify-center w-10 h-10  hover:bg-gray-600 text-white rounded-md" title="Record voice" aria-label="Record voice" onClick={onMicClick}>
-                        <FaMicrophone className="w-5 h-5" />
-                    </button>
+                    {ttsKeyValid === true ? (
+                        <button type="button" className="flex items-center justify-center w-10 h-10  hover:bg-gray-600 text-white rounded-md" title="Record voice" aria-label="Record voice" onClick={onMicClick}>
+                            <FaMicrophone className="w-5 h-5" />
+                        </button>
+                    ) : null}
 
                     <button type="button" className="flex items-center justify-center px-3 h-10  hover:bg-indigo-500 text-white rounded-md" title="Send message" aria-label="Send message" disabled={!isNewestBranch || isShareThread} onClick={onSendClick}>
                         <FaPaperPlane className="w-5 h-5" />
                     </button>
                 </div>
             </div>
+            {showAudioModal && <AudioSpectrumModal onClose={() => setShowAudioModal(false)} thread={actualThread} handleAudioSend={handleAudioSend} />}
         </div>
+        
     );
 }

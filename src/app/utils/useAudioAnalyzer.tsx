@@ -120,8 +120,11 @@ export default function useAudioAnalyzer() {
     const analyserRef = useRef<AnalyserNode | null>(null);
     const sourceRef = useRef<MediaStreamAudioSourceNode | MediaElementAudioSourceNode | null>(null);
     const [data, setData] = useState<Uint8Array | null>(null);
+    const [rms, setRms] = useState<number>(0);
+    const [noiseFloor, setNoiseFloor] = useState<number>(0);
     const rafRef = useRef<number | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
+    const noiseEstimateRef = useRef<number>(0);
     const [muted, setMuted] = useState(false);
     const lastSourceRef = useRef<{ type: 'mic' } | { type: 'audio'; audioEl: HTMLAudioElement } | null>(null);
 
@@ -158,14 +161,57 @@ export default function useAudioAnalyzer() {
         try { analyser.disconnect?.(ctx.destination); } catch {}
         const src = ctx.createMediaStreamSource(stream);
         sourceRef.current = src;
-        src.connect(analyser);
+        // Build a simple filter chain to reduce wind / low-frequency noise and cap highs
+        try {
+            const hp = ctx.createBiquadFilter();
+            hp.type = 'highpass';
+            hp.frequency.value = 80; // remove very low freq (wind)
+            const lp = ctx.createBiquadFilter();
+            lp.type = 'lowpass';
+            lp.frequency.value = 8000; // cap high freqs
+            src.connect(hp);
+            hp.connect(lp);
+            lp.connect(analyser);
+        } catch (e) {
+            // fallback: direct connect
+            try { src.connect(analyser); } catch (err) {}
+        }
 
         const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
+        const freqArray = new Uint8Array(bufferLength);
+        const timeArray = new Uint8Array(analyser.fftSize);
 
         function loop() {
-            analyser.getByteFrequencyData(dataArray);
-            setData(new Uint8Array(dataArray));
+            try {
+                analyser.getByteFrequencyData(freqArray);
+                setData(new Uint8Array(freqArray));
+
+                // time-domain data for RMS/VAD
+                analyser.getByteTimeDomainData(timeArray);
+                // compute normalized RMS (0..1)
+                let sum = 0;
+                for (let i = 0; i < timeArray.length; i++) {
+                    const v = (timeArray[i] - 128) / 128; // -1..1
+                    sum += v * v;
+                }
+                const rmsVal = Math.sqrt(sum / timeArray.length);
+                setRms(rmsVal);
+                // update noise estimate (EMA that tracks low values but grows slowly)
+                try {
+                    const prev = noiseEstimateRef.current || rmsVal;
+                    if (rmsVal < prev) {
+                        // move faster downwards to follow decreases in background noise
+                        noiseEstimateRef.current = prev * 0.7 + rmsVal * 0.3;
+                    } else {
+                        // move slowly upwards so transient voice spikes don't raise the floor
+                        noiseEstimateRef.current = prev * 0.995 + rmsVal * 0.005;
+                    }
+                    // occasionally update exposed state
+                    if (Math.random() < 0.06) setNoiseFloor(noiseEstimateRef.current);
+                } catch (e) {}
+            } catch (e) {
+                // ignore
+            }
             rafRef.current = requestAnimationFrame(loop);
         }
         loop();
@@ -193,10 +239,21 @@ export default function useAudioAnalyzer() {
         lastSourceRef.current = { type: 'audio', audioEl };
 
         const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
+        const freqArray = new Uint8Array(bufferLength);
+        const timeArray = new Uint8Array(analyser.fftSize);
         function loop() {
-            analyser.getByteFrequencyData(dataArray);
-            setData(new Uint8Array(dataArray));
+            try {
+                analyser.getByteFrequencyData(freqArray);
+                setData(new Uint8Array(freqArray));
+                analyser.getByteTimeDomainData(timeArray);
+                let sum = 0;
+                for (let i = 0; i < timeArray.length; i++) {
+                    const v = (timeArray[i] - 128) / 128;
+                    sum += v * v;
+                }
+                const rmsVal = Math.sqrt(sum / timeArray.length);
+                setRms(rmsVal);
+            } catch (e) {}
             rafRef.current = requestAnimationFrame(loop);
         }
         loop();
@@ -280,5 +337,5 @@ export default function useAudioAnalyzer() {
         return () => { analyzerController = null; };
     }, [startFromAudioElement, stop, startMic]);
 
-    return { data, startMic, startFromAudioElement, stop, muted, toggleMute } as const;
+    return { data, rms, noiseFloor, startMic, startFromAudioElement, stop, muted, toggleMute } as const;
 }

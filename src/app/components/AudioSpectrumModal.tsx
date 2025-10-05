@@ -17,7 +17,7 @@ type Props = {
 }
 
 export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }: Props) {
-    const { data, startMic, startFromAudioElement, stop, muted, toggleMute } = useAudioAnalyzer();
+    const { data, rms, noiseFloor, startMic, startFromAudioElement, stop, muted, toggleMute } = useAudioAnalyzer();
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const recognitionRef = useRef<any>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -247,42 +247,62 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
     }, [data]);
 
     // VAD: detect silence (no speech) and if user was speaking, send transcript
+    // VAD via RMS: detect when rms exceeds threshold -> speaking; when it falls below
+    // threshold for a duration -> end of speech. We use two thresholds: enter/exit to
+    // reduce chattiness.
     useEffect(() => {
+    // Dynamic thresholds based on estimated noise floor. This makes the VAD
+    // robust to wind/babble by raising the threshold when background noise is high.
+    const baseNoise = noiseFloor ?? 0;
+    // multipliers chosen empirically; ensure minimum sensible thresholds
+    const ENTER_THRESH = Math.max(0.01, baseNoise * 3 + 0.01); // require clear energy above noise
+    const EXIT_THRESH = Math.max(0.006, baseNoise * 2 + 0.006);
+    const SILENCE_MS = 700; // consider end after 700ms of silence
+
         let silenceTimer: number | null = null;
-        function checkSilence() {
-            // if we have recent speech timestamp, and no new speech for 800ms, consider end
-            if (speakingRef.current && Date.now() - lastSpeechAtRef.current > 800) {
-                // mark not speaking now and schedule send after 2s to allow user to think
-                speakingRef.current = false;
-                if (currentTranscript && currentTranscript.trim().length > 0) {
-                    try {
-                        if (silenceSendTimeoutRef.current) {
-                            // already scheduled
-                            return;
-                        }
-                        silenceSendTimeoutRef.current = window.setTimeout(() => {
-                            // double-check silence hasn't been cancelled/resumed
-                            try {
-                                if (!speakingRef.current && Date.now() - lastSpeechAtRef.current > 800) {
-                                    void sendRecordedAudio();
-                                }
-                            } finally {
-                                silenceSendTimeoutRef.current = null;
+
+        function onRms() {
+            try {
+                const v = rms ?? 0;
+                if (v >= ENTER_THRESH) {
+                    // user speaking
+                    lastSpeechAtRef.current = Date.now();
+                    speakingRef.current = true;
+                    // ensure recording started
+                    try { startRecordingIfNeeded(); } catch (e) {}
+                    // cancel any pending send
+                    try { if (silenceSendTimeoutRef.current) { clearTimeout(silenceSendTimeoutRef.current); silenceSendTimeoutRef.current = null; } } catch (e) {}
+                } else if (speakingRef.current && v < EXIT_THRESH) {
+                    // potentially silent — schedule detection after SILENCE_MS
+                    if (silenceTimer) return;
+                    silenceTimer = window.setTimeout(() => {
+                        try {
+                            if (Date.now() - lastSpeechAtRef.current >= SILENCE_MS) {
+                                speakingRef.current = false;
+                                // send recorded audio if we have recording
+                                void sendRecordedAudio();
                             }
-                        }, 2000);
-                    } catch (e) {
-                        // fallback: immediate send
-                        void sendRecordedAudio();
-                    }
+                        } catch (e) {}
+                        finally { if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; } }
+                    }, SILENCE_MS);
                 }
-            }
+            } catch (e) { /* ignore */ }
         }
-        silenceTimer = window.setInterval(checkSilence, 300);
+
+        // immediate check and then subscribe via RAF (since rms updates in hook RAF)
+        let rafId: number | null = null;
+        function loop() {
+            onRms();
+            rafId = requestAnimationFrame(loop);
+        }
+        rafId = requestAnimationFrame(loop);
+
         return () => {
-            if (silenceTimer) clearInterval(silenceTimer);
+            if (rafId) cancelAnimationFrame(rafId);
+            try { if (silenceTimer) clearTimeout(silenceTimer); silenceTimer = null; } catch (e) {}
             try { if (silenceSendTimeoutRef.current) { clearTimeout(silenceSendTimeoutRef.current); silenceSendTimeoutRef.current = null; } } catch (e) {}
         };
-    }, [currentTranscript]);
+    }, [rms]);
 
     
     async function startRecordingIfNeeded() {
@@ -384,18 +404,34 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                     <h2 className="text-lg font-medium">Mistral Call</h2>
                     <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={onClose} className="w-8 h-8 p-2 rounded-md hover:bg-gray-700"><FaTimes /></motion.button>
                 </nav>
-                <div className="h-px bg-gray-700 w-full"></div>
+
+                <div className="h-px bg-gray-700 w-full" />
+
                 <div className="flex-1 p-4 w-full min-h-0 flex flex-col">
                     <div className="flex-1 w-full min-h-0 p-2 rounded-md">
                         <canvas ref={canvasRef} className="w-full h-full" onClick={() => { void sendRecordedAudio(); }} />
                     </div>
-                    <div className="flex justify-center items-center mt-3 space-x-2">
-                        {/*<motion.button onClick={() => { toggleMute(); }} className={`p-2 rounded-md hover:bg-gray-700 flex items-center space-x-2 ${muted ? 'text-red-400' : ''}`} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                            <FaMicrophoneSlash className='w-8 h-8' />
-                        </motion.button>*/}
-                        <motion.button onClick={() => { stop(); onClose(); }} className="p-2 rounded-md hover:bg-gray-700 flex items-center space-x-2 text-yellow-400 ml-2" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                            <FaSignOutAlt className='w-8 h-8' />
-                        </motion.button>
+
+                    <div className="flex flex-col items-center mt-3 space-y-2">
+                        {typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production' && (
+                            <div className="text-sm text-gray-300">
+                                Level: <span className="font-mono">{rms.toFixed(3)}</span>{' '}
+                                Noise: <span className="font-mono">{noiseFloor.toFixed(3)}</span>
+                            </div>
+                        )}
+
+                        <div className="flex justify-center items-center space-x-2">
+                            {/*
+                                Uncomment to enable mute toggle
+                            <motion.button onClick={() => { toggleMute(); }} className={`p-2 rounded-md hover:bg-gray-700 flex items-center space-x-2 ${muted ? 'text-red-400' : ''}`} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                                <FaMicrophoneSlash className='w-8 h-8' />
+                            </motion.button>
+                            */}
+
+                            <motion.button onClick={() => { stop(); onClose(); }} className="p-2 rounded-md hover:bg-gray-700 flex items-center space-x-2 text-yellow-400 ml-2" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                                <FaSignOutAlt className='w-8 h-8' />
+                            </motion.button>
+                        </div>
                     </div>
                 </div>
             </div>

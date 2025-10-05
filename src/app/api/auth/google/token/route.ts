@@ -28,7 +28,7 @@ export async function POST(request: Request) {
 
     if (!verifyRes.ok) return NextResponse.json({ error: 'Invalid access_token' }, { status: 401 });
     const payload = await verifyRes.json();
-    let sub = payload.sub as string | undefined; // Google subject (unique id)
+    const sub = payload.sub as string | undefined; // Google subject (unique id)
     let email = payload.email as string | undefined;
     let name = payload.name as string | undefined;
     let picture = payload.picture as string | undefined;

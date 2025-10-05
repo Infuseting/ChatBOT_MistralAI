@@ -249,7 +249,7 @@ export function parseImageMarkdown(text : string ) {
         try {
             const fixed = normalizeSrc(src);
             // Try to extract alt attribute if present
-            let altMatch = full.match(/alt=["']([^"']*)["']/i);
+            const altMatch = full.match(/alt=["']([^"']*)["']/i);
             const alt = altMatch ? altMatch[1] : '';
             const altEsc = escapeHtml(alt);
             const downloadBtn = `

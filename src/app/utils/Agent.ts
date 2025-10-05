@@ -312,7 +312,7 @@ async function updateAgent(thread: Thread, userMessage : Message, librariesId : 
 
 async function runAgent(thread: Thread, userMessage: Message, messagesList: any[] = [], imageGeneration : boolean = false, audio : boolean = false) {
     if (!(await existAgent())) await createAgent();
-    let librariesId = await getLibrariesId(userMessage);
+    const librariesId = await getLibrariesId(userMessage);
     const updatedAgent = await updateAgent(thread, userMessage, librariesId ?? [], imageGeneration, audio);
     if (!updatedAgent || !updatedAgent.id) {
         console.error('No agent available to start the conversation. Aborting start call.', { updatedAgent });

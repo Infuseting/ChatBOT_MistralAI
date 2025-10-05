@@ -33,6 +33,12 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
     const lastRecErrorAtRef = useRef<number>(0);
     const lastRecNetworkCountRef = useRef<number>(0);
     const lastRecNetworkBlockedAtRef = useRef<number>(0);
+    const recBackoffRef = useRef<number>(30000); // start with 30s
+    const REC_BACKOFF_MAX = 5 * 60 * 1000; // 5 minutes
+    // Disable automatic recognition in production by default to avoid prod-only
+    // network issues; users can enable it manually via the toggle.
+    const defaultRecEnabled = (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production') ? false : true;
+    const [recognitionEnabled, setRecognitionEnabled] = useState<boolean>(defaultRecEnabled);
     const silenceSendTimeoutRef = useRef<number | null>(null);
 
     // Try to start mic on mount, but show toast and close if microphone isn't available
@@ -72,7 +78,7 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                         setCurrentTranscript(text);
                         lastSpeechAtRef.current = Date.now();
                         // reset any transient network error counters since we got a valid result
-                        try { lastRecNetworkCountRef.current = 0; lastRecNetworkBlockedAtRef.current = 0; } catch (e) {}
+                        try { lastRecNetworkCountRef.current = 0; lastRecNetworkBlockedAtRef.current = 0; recBackoffRef.current = 30000; } catch (e) {}
                         speakingRef.current = true;
                         // If we had scheduled a pending send due to prior silence,
                         // cancel it because user resumed speaking.
@@ -112,10 +118,22 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                         lastRecNetworkCountRef.current = (lastRecNetworkCountRef.current || 0) + 1;
                         // if we see 3 network errors in short succession, abort and back off
                         if (lastRecNetworkCountRef.current >= 3) {
-                            try { recognitionRef.current?.abort?.(); } catch (ex) {}
+                            // Detach handlers and abort this recognition instance to stop any
+                            // further events being emitted. Mark blocked until cooldown.
+                            try {
+                                try { rec.onresult = null; } catch {}
+                                try { rec.onend = null; } catch {}
+                                try { rec.onerror = null; } catch {}
+                                try { rec.onstart = null; } catch {}
+                                try { rec.onnomatch = null; } catch {}
+                            } catch (ex) {}
+                            try { rec.abort?.(); } catch (ex) {}
+                            try { recognitionRef.current = null; } catch (ex) {}
                             lastRecNetworkBlockedAtRef.current = nowErr;
+                            // increase backoff (exponential, capped)
+                            recBackoffRef.current = Math.min(recBackoffRef.current * 2, REC_BACKOFF_MAX);
                             lastRecNetworkCountRef.current = 0;
-                            try { showErrorToast('Reconnaissance vocale indisponible (erreur réseau).'); } catch (ex) {}
+                            try { showErrorToast(`Reconnaissance vocale indisponible (erreur réseau). Réessai dans ${Math.round(recBackoffRef.current/1000)}s`); } catch (ex) {}
                         }
                         return;
                     }
@@ -131,13 +149,14 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                     // don't spin-restart on rapid failures.
                     if (cancelled) return;
                     if (mutedRef.current) return;
-                    // If network errors recently blocked recognition, skip restart for 30s
+                    // If network errors recently blocked recognition, skip restart until backoff expires
                     const now = Date.now();
-                    if (lastRecNetworkBlockedAtRef.current && (now - lastRecNetworkBlockedAtRef.current) < 30000) {
-                        // schedule a delayed retry after the cooldown
+                    if (lastRecNetworkBlockedAtRef.current && (now - lastRecNetworkBlockedAtRef.current) < recBackoffRef.current) {
+                        // schedule a delayed retry after the cooldown remaining
+                        const remaining = recBackoffRef.current - (now - lastRecNetworkBlockedAtRef.current);
                         setTimeout(() => {
-                            try { rec.start(); } catch (e) {}
-                        }, 30000 - (now - lastRecNetworkBlockedAtRef.current));
+                            try { if (recognitionEnabled) rec.start(); } catch (e) {}
+                        }, remaining);
                         return;
                     }
                     if (now - lastRecRestartAtRef.current < 500) {
@@ -155,7 +174,7 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                     lastRecRestartAtRef.current = now;
                 };
                 recognitionRef.current = rec;
-                try { rec.start(); } catch (e) { /* ignore start errors */ }
+                try { if (recognitionEnabled) rec.start(); } catch (e) { /* ignore start errors */ }
             }
         } catch (e) {
             console.warn('SpeechRecognition init failed', e);
@@ -430,9 +449,51 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                         {/*<motion.button onClick={() => { toggleMute(); }} className={`p-2 rounded-md hover:bg-gray-700 flex items-center space-x-2 ${muted ? 'text-red-400' : ''}`} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                             <FaMicrophoneSlash className='w-8 h-8' />
                         </motion.button>*/}
-                        <motion.button onClick={() => { stop(); onClose(); }} className="p-2 rounded-md hover:bg-gray-700 flex items-center space-x-2 text-yellow-400 ml-2" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                            <FaSignOutAlt className='w-8 h-8' />
-                        </motion.button>
+                        {/* show network block badge + retry if recognition is blocked */}
+                                {lastRecNetworkBlockedAtRef.current && (Date.now() - lastRecNetworkBlockedAtRef.current) < recBackoffRef.current ? (
+                                    <div className="flex items-center space-x-2 p-2 rounded-md bg-red-700 text-white">
+                                        <span>Reconnaissance vocale indisponible (erreur réseau)</span>
+                                        <button onClick={async () => {
+                                            try {
+                                                // manual retry: reset backoff and try to start a new recognition instance
+                                                recBackoffRef.current = 30000;
+                                                lastRecNetworkBlockedAtRef.current = 0;
+                                                const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+                                                if (!SpeechRecognition) return;
+                                                const rec2 = new SpeechRecognition();
+                                                rec2.continuous = true;
+                                                rec2.interimResults = true;
+                                                rec2.lang = 'fr-FR';
+                                                // reuse the existing initialization logic by assigning and starting
+                                                recognitionRef.current = rec2;
+                                                try { rec2.start(); } catch (e) { console.warn('Retry start failed', e); }
+                                            } catch (e) { console.warn('Retry init failed', e); }
+                                        }} className="ml-2 p-2 bg-white text-black rounded-md">Réessayer</button>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center space-x-2">
+                                        <motion.button onClick={() => { stop(); onClose(); }} className="p-2 rounded-md hover:bg-gray-700 flex items-center space-x-2 text-yellow-400 ml-2" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                                            <FaSignOutAlt className='w-8 h-8' />
+                                        </motion.button>
+                                        <div className="ml-2 flex items-center space-x-2">
+                                            <label className="text-sm text-gray-300">Reconnaissance</label>
+                                            <button onClick={() => {
+                                                try {
+                                                    const next = !recognitionEnabled;
+                                                    setRecognitionEnabled(next);
+                                                    if (!next) {
+                                                        try { recognitionRef.current?.abort?.(); } catch {}
+                                                        recognitionRef.current = null;
+                                                    } else {
+                                                        try { recognitionRef.current?.start?.(); } catch {}
+                                                    }
+                                                } catch (e) {}
+                                            }} className={`p-2 rounded-md ${recognitionEnabled ? 'bg-green-600' : 'bg-gray-600'} text-white`}>
+                                                {recognitionEnabled ? 'On' : 'Off'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                     </div>
                 </div>
             </div>

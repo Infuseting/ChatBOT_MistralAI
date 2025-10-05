@@ -148,6 +148,18 @@ export default function useAudioAnalyzer() {
         lastSourceRef.current = { type: 'mic' };
         const ctx = audioCtxRef.current ?? new (window.AudioContext || (window as any).webkitAudioContext)();
         audioCtxRef.current = ctx;
+        try {
+            // Some mobile browsers create the AudioContext in 'suspended' state
+            // until a user gesture resumes it. Try to resume so analyzers/startMic
+            // work on phones after a user interaction.
+            if (ctx.state === 'suspended') {
+                await ctx.resume();
+                // small debug: optional console message
+                // console.debug('useAudioAnalyzer: audio context resumed');
+            }
+        } catch (e) {
+            // ignore resume errors
+        }
         const analyser = analyserRef.current ?? ctx.createAnalyser();
         analyser.fftSize = 2048;
         analyserRef.current = analyser;

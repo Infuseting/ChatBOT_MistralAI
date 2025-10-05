@@ -288,6 +288,10 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
     async function startRecordingIfNeeded() {
         try {
             if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') return;
+            if (typeof (window as any).MediaRecorder === 'undefined') {
+                showErrorToast('Votre navigateur ne supporte pas l\'enregistrement audio (MediaRecorder). Essayez avec Chrome/Edge sur mobile.');
+                return;
+            }
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             recordingStreamRef.current = stream;
@@ -390,6 +394,18 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                         <canvas ref={canvasRef} className="w-full h-full" onClick={() => { void sendRecordedAudio(); }} />
                     </div>
                     <div className="flex justify-center items-center mt-3 space-x-2">
+                        {/* Manual enable button for mobile: some browsers require a user gesture to resume audio */}
+                        <motion.button onClick={async () => {
+                            try {
+                                await startMic();
+                                try { await startRecordingIfNeeded(); } catch (e) {}
+                            } catch (e) {
+                                console.warn('Enable mic failed', e);
+                                showErrorToast('Impossible d\'activer le micro');
+                            }
+                        }} className="p-2 rounded-md hover:bg-gray-700 flex items-center space-x-2 ml-2" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                            <span>Activer le micro</span>
+                        </motion.button>
                         {/*<motion.button onClick={() => { toggleMute(); }} className={`p-2 rounded-md hover:bg-gray-700 flex items-center space-x-2 ${muted ? 'text-red-400' : ''}`} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                             <FaMicrophoneSlash className='w-8 h-8' />
                         </motion.button>*/}

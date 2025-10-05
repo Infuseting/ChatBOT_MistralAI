@@ -31,6 +31,8 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
     const mutedRef = useRef(muted);
     const lastRecRestartAtRef = useRef<number>(0);
     const lastRecErrorAtRef = useRef<number>(0);
+    const lastRecNetworkCountRef = useRef<number>(0);
+    const lastRecNetworkBlockedAtRef = useRef<number>(0);
     const silenceSendTimeoutRef = useRef<number | null>(null);
 
     // Try to start mic on mount, but show toast and close if microphone isn't available
@@ -69,6 +71,8 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                     if (text) {
                         setCurrentTranscript(text);
                         lastSpeechAtRef.current = Date.now();
+                        // reset any transient network error counters since we got a valid result
+                        try { lastRecNetworkCountRef.current = 0; lastRecNetworkBlockedAtRef.current = 0; } catch (e) {}
                         speakingRef.current = true;
                         // If we had scheduled a pending send due to prior silence,
                         // cancel it because user resumed speaking.
@@ -84,17 +88,42 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                 rec.onerror = (e: any) => {
                     // common benign errors like 'no-speech' or 'aborted' can fire
                     // frequently (for example when user is silent). Throttle
-                    // warnings to avoid spamming the console.
+                    // warnings to avoid spamming the console. Treat 'network'
+                    // errors specially: if they happen repeatedly, stop/abort
+                    // recognition and inform the user.
                     const errType = e?.error || e?.type || e?.message || 'unknown';
-                    const now = Date.now();
+                    const nowErr = Date.now();
                     if (errType === 'no-speech' || errType === 'aborted') {
                         // only warn at most once every 5s for these types
-                        if (now - lastRecErrorAtRef.current > 5000) {
+                        if (nowErr - lastRecErrorAtRef.current > 5000) {
                             console.debug('SpeechRecognition (ignored):', errType);
-                            lastRecErrorAtRef.current = now;
+                            lastRecErrorAtRef.current = nowErr;
                         }
-                    } else {
+                        return;
+                    }
+
+                    if (errType === 'network') {
+                        // throttle network warnings to at most once every 15s
+                        if (nowErr - lastRecErrorAtRef.current > 15000) {
+                            console.warn('SpeechRecognition network error', e);
+                            lastRecErrorAtRef.current = nowErr;
+                        }
+                        // increment transient network error counter
+                        lastRecNetworkCountRef.current = (lastRecNetworkCountRef.current || 0) + 1;
+                        // if we see 3 network errors in short succession, abort and back off
+                        if (lastRecNetworkCountRef.current >= 3) {
+                            try { recognitionRef.current?.abort?.(); } catch (ex) {}
+                            lastRecNetworkBlockedAtRef.current = nowErr;
+                            lastRecNetworkCountRef.current = 0;
+                            try { showErrorToast('Reconnaissance vocale indisponible (erreur réseau).'); } catch (ex) {}
+                        }
+                        return;
+                    }
+
+                    // other errors: warn (throttled by lastRecErrorAtRef to avoid spam)
+                    if (nowErr - lastRecErrorAtRef.current > 5000) {
                         console.warn('SpeechRecognition error', e);
+                        lastRecErrorAtRef.current = nowErr;
                     }
                 };
                 rec.onend = () => {
@@ -102,7 +131,15 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                     // don't spin-restart on rapid failures.
                     if (cancelled) return;
                     if (mutedRef.current) return;
+                    // If network errors recently blocked recognition, skip restart for 30s
                     const now = Date.now();
+                    if (lastRecNetworkBlockedAtRef.current && (now - lastRecNetworkBlockedAtRef.current) < 30000) {
+                        // schedule a delayed retry after the cooldown
+                        setTimeout(() => {
+                            try { rec.start(); } catch (e) {}
+                        }, 30000 - (now - lastRecNetworkBlockedAtRef.current));
+                        return;
+                    }
                     if (now - lastRecRestartAtRef.current < 500) {
                         // too-frequent restarts; wait a bit
                         setTimeout(() => {
@@ -288,10 +325,6 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
     async function startRecordingIfNeeded() {
         try {
             if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') return;
-            if (typeof (window as any).MediaRecorder === 'undefined') {
-                showErrorToast('Votre navigateur ne supporte pas l\'enregistrement audio (MediaRecorder). Essayez avec Chrome/Edge sur mobile.');
-                return;
-            }
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             recordingStreamRef.current = stream;
@@ -394,18 +427,6 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                         <canvas ref={canvasRef} className="w-full h-full" onClick={() => { void sendRecordedAudio(); }} />
                     </div>
                     <div className="flex justify-center items-center mt-3 space-x-2">
-                        {/* Manual enable button for mobile: some browsers require a user gesture to resume audio */}
-                        <motion.button onClick={async () => {
-                            try {
-                                await startMic();
-                                try { await startRecordingIfNeeded(); } catch (e) {}
-                            } catch (e) {
-                                console.warn('Enable mic failed', e);
-                                showErrorToast('Impossible d\'activer le micro');
-                            }
-                        }} className="p-2 rounded-md hover:bg-gray-700 flex items-center space-x-2 ml-2" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                            <span>Activer le micro</span>
-                        </motion.button>
                         {/*<motion.button onClick={() => { toggleMute(); }} className={`p-2 rounded-md hover:bg-gray-700 flex items-center space-x-2 ${muted ? 'text-red-400' : ''}`} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                             <FaMicrophoneSlash className='w-8 h-8' />
                         </motion.button>*/}

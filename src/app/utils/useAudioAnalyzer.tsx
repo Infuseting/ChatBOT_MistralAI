@@ -18,7 +18,13 @@ export let analyzerController: {
     startMic?: () => Promise<void>;
     getLastSourceType?: () => 'mic' | 'audio' | null;
     setMuted?: (v: boolean) => void;
+    recalibrateNoise?: (base?: number) => void;
+    startAmbientCalibration?: (durationMs?: number) => void;
 } | null = null;
+// Note: analyzerController will expose a `recalibrateNoise(base?: number)` method
+// after the hook mounts. Call this from UI components to reset the noise
+// estimator between messages (useful after sending audio so the baseline
+// doesn't remain artificially high).
 
 // Track a TTS audio element created by playTTSForText so it can be stopped
 // (for example when the modal is closed before the TTS finishes or arrives).
@@ -122,9 +128,16 @@ export default function useAudioAnalyzer() {
     const [data, setData] = useState<Uint8Array | null>(null);
     const [rms, setRms] = useState<number>(0);
     const [noiseFloor, setNoiseFloor] = useState<number>(0);
+    const [ambientNoise, setAmbientNoise] = useState<number>(0);
     const rafRef = useRef<number | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const noiseEstimateRef = useRef<number>(0);
+    const conversationNoiseRef = useRef<number>(0); // long-term baseline across the conversation
+    const lastNoiseUpdateRef = useRef<number>(0);
+    const ambientNoiseRef = useRef<number>(0);
+    const calibrationSamplesRef = useRef<number[] | null>(null);
+    const calibrationEndRef = useRef<number>(0);
+    const noiseHoldUntilRef = useRef<number>(0);
     const [muted, setMuted] = useState(false);
     const lastSourceRef = useRef<{ type: 'mic' } | { type: 'audio'; audioEl: HTMLAudioElement } | null>(null);
 
@@ -196,18 +209,86 @@ export default function useAudioAnalyzer() {
                 }
                 const rmsVal = Math.sqrt(sum / timeArray.length);
                 setRms(rmsVal);
-                // update noise estimate (EMA that tracks low values but grows slowly)
+                // If we're calibrating ambient noise, collect samples for a short window
+                try {
+                    if (calibrationSamplesRef.current && Date.now() <= calibrationEndRef.current) {
+                        calibrationSamplesRef.current.push(rmsVal);
+                    } else if (calibrationSamplesRef.current) {
+                        // calibration window ended; compute mean
+                        try {
+                            const samples = calibrationSamplesRef.current;
+                            if (samples && samples.length > 0) {
+                                const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
+                                ambientNoiseRef.current = mean;
+                                setAmbientNoise(mean);
+                                // ensure noiseFloor isn't below ambient measured
+                                try { setNoiseFloor(prev => Math.max(prev, mean)); } catch {}
+                                // also gently seed conversation baseline
+                                try { conversationNoiseRef.current = mean; } catch {}
+                            }
+                        } catch (e) {}
+                        calibrationSamplesRef.current = null;
+                        calibrationEndRef.current = 0;
+                    }
+                } catch (e) {}
+                // update adaptive noise estimate with asymmetric EMA:
+                // - avoid increasing the noise estimate when the sample looks like speech
+                // - when noise increases (not speech), track at alphaRise
+                // - when noise decreases, decay at alphaFall
                 try {
                     const prev = noiseEstimateRef.current || rmsVal;
-                    if (rmsVal < prev) {
-                        // move faster downwards to follow decreases in background noise
-                        noiseEstimateRef.current = prev * 0.7 + rmsVal * 0.3;
+                    // coefficients chosen to give perceptible adaptation without following voice peaks
+                    const alphaRise = 0.06; // slower upward tracking so it doesn't chase voice
+                    const alphaFall = 0.35; // faster fall so quieting is noticed
+
+                    // Activity heuristic: refresh a hold window on any short-term
+                    // activity (even moderate). This prevents the short-term
+                    // estimator from increasing between words in a continuous
+                    // utterance. Activity is detected if rms rises above a small
+                    // absolute or relative gap vs prev.
+                    const now = Date.now();
+                    const activityCandidate = rmsVal > (prev + 0.006) || rmsVal > (prev * 1.05);
+                    if (activityCandidate) {
+                        // refresh hold period (do not allow upward updates for a bit)
+                        noiseHoldUntilRef.current = now + 3000; // 3.0s hold
+                        // slightly decay the estimate so it doesn't creep up
+                        noiseEstimateRef.current = prev * 0.995;
+                    } else if (now < noiseHoldUntilRef.current) {
+                        // During hold, allow only decay (no upward tracking)
+                        if (rmsVal < prev) {
+                            noiseEstimateRef.current = prev * (1 - alphaFall) + rmsVal * alphaFall;
+                        } else {
+                            // keep previous or very slight decay
+                            noiseEstimateRef.current = prev * 0.997;
+                        }
                     } else {
-                        // move slowly upwards so transient voice spikes don't raise the floor
-                        noiseEstimateRef.current = prev * 0.995 + rmsVal * 0.005;
+                        if (rmsVal > prev) {
+                            noiseEstimateRef.current = prev * (1 - alphaRise) + rmsVal * alphaRise;
+                        } else {
+                            noiseEstimateRef.current = prev * (1 - alphaFall) + rmsVal * alphaFall;
+                        }
                     }
-                    // occasionally update exposed state
-                    if (Math.random() < 0.06) setNoiseFloor(noiseEstimateRef.current);
+
+                    // update conversation-level baseline very slowly so it reflects
+                    // long-term ambient conditions but is not polluted by speech.
+                    try {
+                        const convPrev = conversationNoiseRef.current || noiseEstimateRef.current;
+                        const convAlpha = 0.005; // much slower adaptation (>>50s)
+                        // Only update conversation baseline when we are NOT in an activityCandidate
+                        if (!activityCandidate) {
+                            conversationNoiseRef.current = convPrev * (1 - convAlpha) + noiseEstimateRef.current * convAlpha;
+                        }
+                    } catch (e) {}
+
+                    // publish a stable noiseFloor about 5x/sec using the short-term
+                    // estimator which is now guarded against following speech peaks.
+                    const nowTick = Date.now();
+                    if (nowTick - lastNoiseUpdateRef.current > 180) {
+                        lastNoiseUpdateRef.current = nowTick;
+                        // use the short-term estimate as the published floor; keep a
+                        // tiny minimum to avoid zero values.
+                        setNoiseFloor(Math.max(0.0005, noiseEstimateRef.current));
+                    }
                 } catch (e) {}
             } catch (e) {
                 // ignore
@@ -333,9 +414,30 @@ export default function useAudioAnalyzer() {
             startMic: async () => { await startMic(); },
             getLastSourceType: () => lastSourceRef.current?.type ?? null,
             setMuted: (v: boolean) => { setMuted(v); },
+            recalibrateNoise: (base?: number) => {
+                try {
+                    const b = (typeof base === 'number') ? base : noiseEstimateRef.current || 0;
+                    noiseEstimateRef.current = b;
+                    conversationNoiseRef.current = b;
+                    lastNoiseUpdateRef.current = Date.now();
+                    noiseHoldUntilRef.current = Date.now() + 500; // short hold after recal
+                    try { setNoiseFloor(Math.max(0.0005, b)); } catch {}
+                } catch (e) { /* ignore */ }
+            }
+            ,
+            startAmbientCalibration: (durationMs = 2000) => {
+                try {
+                    calibrationSamplesRef.current = [];
+                    calibrationEndRef.current = Date.now() + durationMs;
+                    // set a fallback timeout to finalize calibration
+                    setTimeout(() => {
+                        try { calibrationEndRef.current = 0; } catch {}
+                    }, durationMs + 100);
+                } catch (e) {}
+            }
         };
         return () => { analyzerController = null; };
     }, [startFromAudioElement, stop, startMic]);
 
-    return { data, rms, noiseFloor, startMic, startFromAudioElement, stop, muted, toggleMute } as const;
+    return { data, rms, noiseFloor, ambientNoise, startMic, startFromAudioElement, stop, muted, toggleMute } as const;
 }

@@ -4,6 +4,8 @@ import { FaTimes, FaMicrophoneSlash, FaSignOutAlt } from 'react-icons/fa';
 import { motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import useAudioAnalyzer, { playTTSForText, analyzerController } from '../utils/useAudioAnalyzer';
+import useRNNoise from '../hooks/useRNNoise';
+import { VAD_CONFIG, computeThresholds } from '../utils/vadConfig';
 import { showErrorToast } from "../utils/toast";
 import { Thread } from '../utils/Thread';
 
@@ -17,21 +19,37 @@ type Props = {
 }
 
 export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }: Props) {
-    const { data, rms, noiseFloor, startMic, startFromAudioElement, stop, muted, toggleMute } = useAudioAnalyzer();
+    const { data, rms, noiseFloor, ambientNoise, startMic, startFromAudioElement, stop, muted, toggleMute } = useAudioAnalyzer();
+    const rn = useRNNoise();
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
-    const recognitionRef = useRef<any>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const recordingStreamRef = useRef<MediaStream | null>(null);
     const recordChunksRef = useRef<Blob[]>([]);
+    const recordingStartedAtRef = useRef<number | null>(null);
     const [currentTranscript, setCurrentTranscript] = useState('');
     const lastSpeechAtRef = useRef<number>(0);
     const speakingRef = useRef(false);
+    const speakingStartedAtRef = useRef<number | null>(null);
+    const inSpeechSessionRef = useRef<boolean>(false);
+    const preSpeechNoiseRef = useRef<number>(0);
     const processingRef = useRef(false);
     const playingAudioRef = useRef<HTMLAudioElement | null>(null);
     const mutedRef = useRef(muted);
-    const lastRecRestartAtRef = useRef<number>(0);
-    const lastRecErrorAtRef = useRef<number>(0);
+    // SpeechRecognition removed: we rely solely on RMS/EMA from the analyzer
     const silenceSendTimeoutRef = useRef<number | null>(null);
+
+    function resetVADState() {
+        // Reset speaking/session state but do NOT clear recorded buffers or
+        // recording timestamps — that prevents a valid recordedDuration from
+        // accumulating and causes the send guard (MIN_RECORD_MS) to never pass.
+        try { speakingRef.current = false; } catch {}
+        try { speakingStartedAtRef.current = null; } catch {}
+        try { inSpeechSessionRef.current = false; } catch {}
+        try { preSpeechNoiseRef.current = 0; } catch {}
+        // Do not touch recordChunksRef or recordingStartedAtRef here.
+        // Also ensure we don't immediately send: clear any pending timeouts
+        try { if (silenceSendTimeoutRef.current) { clearTimeout(silenceSendTimeoutRef.current); silenceSendTimeoutRef.current = null; } } catch (e) {}
+    }
 
     // Try to start mic on mount, but show toast and close if microphone isn't available
     useEffect(() => {
@@ -39,6 +57,12 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
         void (async () => {
             try {
                 await startMic();
+                    try { analyzerController?.startAmbientCalibration?.(2000); } catch {}
+                    // After starting the mic, reset local VAD state and recalibrate
+                    try { resetVADState(); } catch {}
+                    try { analyzerController?.recalibrateNoise?.(ambientNoise ?? undefined); } catch {}
+                    // RNNoise: consumer can press "Load RNNoise" to attach a worklet
+                    try { /* no-op: worklet is loaded manually from UI */ } catch (e) {}
                 // start recording if not muted
                 try { if (!muted) await startRecordingIfNeeded(); } catch (e) {}
             } catch (e) {
@@ -49,85 +73,15 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
             }
         })();
 
-        // Setup SpeechRecognition if available
-        try {
-            const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-            if (SpeechRecognition) {
-                const rec = new SpeechRecognition();
-                rec.continuous = true;
-                rec.interimResults = true;
-                rec.lang = 'fr-FR';
-                rec.onresult = (ev: any) => {
-                    let interim = '';
-                    let final = '';
-                    for (let i = ev.resultIndex; i < ev.results.length; ++i) {
-                        const r = ev.results[i];
-                        if (r.isFinal) final += r[0].transcript;
-                        else interim += r[0].transcript;
-                    }
-                    const text = (final + ' ' + interim).trim();
-                    if (text) {
-                        setCurrentTranscript(text);
-                        lastSpeechAtRef.current = Date.now();
-                        speakingRef.current = true;
-                        // If we had scheduled a pending send due to prior silence,
-                        // cancel it because user resumed speaking.
-                        try { if (silenceSendTimeoutRef.current) { clearTimeout(silenceSendTimeoutRef.current); silenceSendTimeoutRef.current = null; } } catch (e) {}
-                        // start recording when we detect speech
-                        try { startRecordingIfNeeded(); } catch (e) {}
-                    }
-                    // If we got a final result, stop recording and send the recorded audio
-                    if (final && final.trim().length > 0) {
-                        void sendRecordedAudio();
-                    }
-                };
-                rec.onerror = (e: any) => {
-                    // common benign errors like 'no-speech' or 'aborted' can fire
-                    // frequently (for example when user is silent). Throttle
-                    // warnings to avoid spamming the console.
-                    const errType = e?.error || e?.type || e?.message || 'unknown';
-                    const now = Date.now();
-                    if (errType === 'no-speech' || errType === 'aborted') {
-                        // only warn at most once every 5s for these types
-                        if (now - lastRecErrorAtRef.current > 5000) {
-                            console.debug('SpeechRecognition (ignored):', errType);
-                            lastRecErrorAtRef.current = now;
-                        }
-                    } else {
-                        console.warn('SpeechRecognition error', e);
-                    }
-                };
-                rec.onend = () => {
-                    // try restart unless modal closed or muted; add backoff so we
-                    // don't spin-restart on rapid failures.
-                    if (cancelled) return;
-                    if (mutedRef.current) return;
-                    const now = Date.now();
-                    if (now - lastRecRestartAtRef.current < 500) {
-                        // too-frequent restarts; wait a bit
-                        setTimeout(() => {
-                            try { rec.start(); } catch (e) {}
-                        }, 700);
-                        lastRecRestartAtRef.current = Date.now();
-                        return;
-                    }
-                    try { rec.start(); } catch (e) {
-                        // if start fails, schedule a delayed retry
-                        setTimeout(() => { try { rec.start(); } catch {} }, 700);
-                    }
-                    lastRecRestartAtRef.current = now;
-                };
-                recognitionRef.current = rec;
-                try { rec.start(); } catch (e) { /* ignore start errors */ }
-            }
-        } catch (e) {
-            console.warn('SpeechRecognition init failed', e);
-        }
+        // SpeechRecognition intentionally disabled. We rely on the analyzer's
+        // RMS + EMA noise-floor for VAD and recording triggers. This avoids
+        // browser-dependent SpeechRecognition network errors in production.
 
         return () => {
             cancelled = true;
-            try { recognitionRef.current?.stop?.(); } catch {}
-            stop();
+            // SpeechRecognition removed; nothing to stop here.
+            try { stop(); } catch {}
+            try { speakingStartedAtRef.current = null; } catch {}
             try { stopRecordingAndGetBlob(); } catch {}
         };
     }, []);
@@ -138,14 +92,29 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
     useEffect(() => {
         mutedRef.current = muted;
         if (muted) {
-            try { recognitionRef.current?.abort?.(); } catch {}
+            // Stop capturing while muted
             try { stopRecordingAndGetBlob(); } catch {}
             try { stop(); } catch {}
+            try { speakingStartedAtRef.current = null; } catch {}
         } else {
-            // unmuted: try to restart mic/recognition
+            // unmuted: try to restart mic
             (async () => {
                 try { await startMic(); } catch (e) {}
-                try { recognitionRef.current?.start?.(); } catch {}
+            })();
+        }
+    }, [muted]);
+
+    // Ensure we reset VAD state and recalibrate when unmuting / mic restarts
+    useEffect(() => {
+        if (!muted) {
+            // small async task: after mic is started, reset VAD and recalibrate
+            (async () => {
+                try {
+                    // give startMic a chance to create context/stream
+                    await new Promise(r => setTimeout(r, 80));
+                    try { resetVADState(); } catch {}
+                    try { analyzerController?.recalibrateNoise?.(ambientNoise ?? undefined); } catch {}
+                } catch (e) { /* ignore */ }
             })();
         }
     }, [muted]);
@@ -247,49 +216,119 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
     }, [data]);
 
     // VAD: detect silence (no speech) and if user was speaking, send transcript
-    // VAD via RMS: detect when rms exceeds threshold -> speaking; when it falls below
-    // threshold for a duration -> end of speech. We use two thresholds: enter/exit to
-    // reduce chattiness.
+    // Use refs for `rms` and `noiseFloor` so the RAF loop below can run once
+    // and preserve smoothing state across frequent `rms` updates.
+    const rmsRef = useRef<number>(rms);
+    useEffect(() => { rmsRef.current = rms ?? 0; }, [rms]);
+    const noiseFloorRef = useRef<number>(noiseFloor ?? 0);
+    useEffect(() => { noiseFloorRef.current = noiseFloor ?? 0; }, [noiseFloor]);
+
     useEffect(() => {
-    // Dynamic thresholds based on estimated noise floor. This makes the VAD
-    // robust to wind/babble by raising the threshold when background noise is high.
-    const baseNoise = noiseFloor ?? 0;
-    // multipliers chosen empirically; ensure minimum sensible thresholds
-    const ENTER_THRESH = Math.max(0.01, baseNoise * 3 + 0.01); // require clear energy above noise
-    const EXIT_THRESH = Math.max(0.006, baseNoise * 2 + 0.006);
-    const SILENCE_MS = 700; // consider end after 700ms of silence
+    const SILENCE_MS = VAD_CONFIG.SILENCE_MS;
+
+    // Local smoothed RMS to avoid reacting to tiny spikes. Use a more
+    // responsive smoothing so quiet/short utterances are detected.
+    const smoothedRmsRef = { value: 0 };
+    // Track a short-term speech level while the user is speaking. This is
+    // used to compute a dynamic exit threshold so that end-of-speech is
+    // detected relative to the user's own voice level rather than only the
+    // ambient noise floor.
+    const speechLevelRef = { value: 0 };
+    // Temporary post-speech noise boost to prevent immediate re-triggering
+    // when background music or other ambient rises after speech ends.
+    const postSpeechNoiseRef = { value: 0 };
+    const postSpeechExpiresRef = { value: 0 };
+
+    // thresholds computed from config
 
         let silenceTimer: number | null = null;
 
         function onRms() {
             try {
-                const v = rms ?? 0;
-                if (v >= ENTER_THRESH) {
+                const v = rmsRef.current ?? 0;
+                // smooth the incoming rms (short memory). Use a 50/50 mix to
+                // be more responsive to brief utterances.
+                smoothedRmsRef.value = smoothedRmsRef.value * 0.5 + v * 0.5;
+                const smooth = smoothedRmsRef.value;
+
+                // If we're in an active speech session, freeze the noise used
+                // for decisioning to the pre-speech baseline so it doesn't
+                // follow the voice. Otherwise use the current noise floor.
+                const baseNoise = inSpeechSessionRef.current ? (preSpeechNoiseRef.current || noiseFloorRef.current || 0) : (noiseFloorRef.current ?? 0);
+                const effectiveNoise = baseNoise + VAD_CONFIG.EFFECTIVE_NOISE_GAP;
+                const { enter: ENTER_THRESH, exit: EXIT_THRESH } = computeThresholds(effectiveNoise);
+
+                if (smooth >= ENTER_THRESH) {
                     // user speaking
+                    if (!speakingRef.current) {
+                        speakingStartedAtRef.current = Date.now();
+                        // capture the noise baseline at the moment speech begins
+                        try { preSpeechNoiseRef.current = (typeof ambientNoise === 'number' && ambientNoise > 0) ? ambientNoise : (noiseFloorRef.current ?? 0); } catch {}
+                        inSpeechSessionRef.current = true;
+                    }
                     lastSpeechAtRef.current = Date.now();
                     speakingRef.current = true;
+                    // update short-term speech level (responsive)
+                    speechLevelRef.value = speechLevelRef.value * 0.75 + smooth * 0.25;
                     // ensure recording started
                     try { startRecordingIfNeeded(); } catch (e) {}
                     // cancel any pending send
                     try { if (silenceSendTimeoutRef.current) { clearTimeout(silenceSendTimeoutRef.current); silenceSendTimeoutRef.current = null; } } catch (e) {}
-                } else if (speakingRef.current && v < EXIT_THRESH) {
-                    // potentially silent — schedule detection after SILENCE_MS
+                } else if (speakingRef.current) {
+                    // While speaking, compute a dynamic exit threshold based on
+                    // speech level and ambient noise. Also factor in any
+                    // temporary post-speech noise boost.
+                    const speechLevel = speechLevelRef.value || 0;
+                    const postNoise = (postSpeechExpiresRef.value > Date.now()) ? postSpeechNoiseRef.value : 0;
+                    const dynamicExit = Math.max(EXIT_THRESH, speechLevel * 0.45, effectiveNoise + 0.007, postNoise);
+                    if (smooth < dynamicExit) {
+                    // potentially silent — schedule detection after SILENCE_MS.
+                    // When inside a speech session, use a longer timeout so
+                    // short breaths / pauses are ignored.
+                    const END_SILENCE_MS = inSpeechSessionRef.current ? VAD_CONFIG.SESSION_END_SILENCE_MS : SILENCE_MS;
                     if (silenceTimer) return;
                     silenceTimer = window.setTimeout(() => {
                         try {
-                            if (Date.now() - lastSpeechAtRef.current >= SILENCE_MS) {
-                                speakingRef.current = false;
-                                // send recorded audio if we have recording
-                                void sendRecordedAudio();
+                            if (Date.now() - lastSpeechAtRef.current >= END_SILENCE_MS) {
+                                // If we recorded something reasonably long, force send
+                                // even if levels are close to noise (avoids stuck state).
+                                const recordedAt = recordingStartedAtRef.current;
+                                const recordedDuration = recordedAt ? (Date.now() - recordedAt) : 0;
+                                const speakingAt = speakingStartedAtRef.current;
+                                const speakingDuration = speakingAt ? (Date.now() - speakingAt) : 0;
+                                const MIN_RECORD_MS = VAD_CONFIG.MIN_RECORD_MS;
+                                const MIN_SPEECH_MS = VAD_CONFIG.MIN_SPEECH_MS; // require at least this long of detected speech
+                                // If measured ambient noise approximately equals the
+                                // current smoothed level, allow a shorter gate so the
+                                // message is still sent (handles the noise==level case).
+                                const EPS_EQUAL = 0.001; // threshold for "approximately equal"
+                                const approxEqual = Math.abs(smooth - baseNoise) <= EPS_EQUAL;
+                                const SHORT_GATE_MS = VAD_CONFIG.SHORT_GATE_MS; // shorter minimum when approxEqual
+                                if ((recordedDuration >= MIN_RECORD_MS || (approxEqual && recordedDuration >= SHORT_GATE_MS)) && speakingDuration >= MIN_SPEECH_MS) {
+                                    speakingRef.current = false;
+                                    speakingStartedAtRef.current = null;
+                                    // speech session ends now
+                                    inSpeechSessionRef.current = false;
+                                    preSpeechNoiseRef.current = 0;
+                                    void sendRecordedAudio();
+                                    try {
+                                        const boost = Math.max(effectiveNoise + VAD_CONFIG.EFFECTIVE_NOISE_GAP, speechLevelRef.value * 0.45, 0.01);
+                                        postSpeechNoiseRef.value = boost;
+                                        postSpeechExpiresRef.value = Date.now() + 1000;
+                                    } catch (e) {}
+                                } else {
+                                    // Too short — ignore as likely noise/false trigger
+                                }
                             }
                         } catch (e) {}
                         finally { if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; } }
-                    }, SILENCE_MS);
+                    }, END_SILENCE_MS);
+                    }
                 }
             } catch (e) { /* ignore */ }
         }
 
-        // immediate check and then subscribe via RAF (since rms updates in hook RAF)
+        // immediate check and then subscribe via RAF (loop runs once and reads refs)
         let rafId: number | null = null;
         function loop() {
             onRms();
@@ -302,7 +341,7 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
             try { if (silenceTimer) clearTimeout(silenceTimer); silenceTimer = null; } catch (e) {}
             try { if (silenceSendTimeoutRef.current) { clearTimeout(silenceSendTimeoutRef.current); silenceSendTimeoutRef.current = null; } } catch (e) {}
         };
-    }, [rms]);
+    }, []);
 
     
     async function startRecordingIfNeeded() {
@@ -317,6 +356,7 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                 if (ev.data && ev.data.size > 0) recordChunksRef.current.push(ev.data);
             };
             mr.start();
+            recordingStartedAtRef.current = Date.now();
             mediaRecorderRef.current = mr;
         } catch (e) {
             console.warn('startRecordingIfNeeded failed', e);
@@ -333,6 +373,7 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                         recordingStreamRef.current.getTracks().forEach(t => t.stop());
                         recordingStreamRef.current = null;
                     }
+                    try { speakingStartedAtRef.current = null; } catch {}
                     resolve(null);
                     return;
                 }
@@ -345,6 +386,8 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                         recordingStreamRef.current = null;
                         mediaRecorderRef.current = null;
                         recordChunksRef.current = [];
+                        recordingStartedAtRef.current = null;
+                        try { speakingStartedAtRef.current = null; } catch {}
                         resolve(blob);
                     } catch (err) {
                         resolve(null);
@@ -357,6 +400,7 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                 recordingStreamRef.current = null;
                 mediaRecorderRef.current = null;
                 recordChunksRef.current = [];
+                recordingStartedAtRef.current = null;
                 resolve(null);
             }
         });
@@ -370,7 +414,7 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
         if (processingRef.current) return;
         processingRef.current = true;
         try {
-            try { recognitionRef.current?.abort?.(); } catch {}
+            // SpeechRecognition removed; just stop the recorder and get blob
             const blob = await stopRecordingAndGetBlob();
             if (!blob) {
                 return;
@@ -381,14 +425,16 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                 
                     try { analyzerController?.setMuted?.(true); } catch {}
                     await handleAudioSend(thread, blob as Blob);
+                    // After sending, recalibrate the analyzer noise baseline so
+                    // the next message isn't biased by the previous speech.
+                    try { analyzerController?.recalibrateNoise?.(); } catch {}
                 } catch (e) {
                     console.error('handleAudioSend failed', e);
                 }
             }
         } finally {
             processingRef.current = false;
-            // restart recognition unless muted
-            try { if (!mutedRef.current) recognitionRef.current?.start?.(); } catch {}
+            // Nothing to restart (SpeechRecognition removed).
             setCurrentTranscript('');
         }
     }
@@ -417,8 +463,33 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                             <div className="text-sm text-gray-300">
                                 Level: <span className="font-mono">{rms.toFixed(3)}</span>{' '}
                                 Noise: <span className="font-mono">{noiseFloor.toFixed(3)}</span>
+                                <div className="mt-2 text-xs text-gray-400">
+                                    Speaking: <span className="font-mono">{speakingRef.current ? 'yes' : 'no'}</span>{' '}
+                                    Recording: <span className="font-mono">{mediaRecorderRef.current?.state ?? 'idle'}</span>{' '}
+                                    RecordedMs: <span className="font-mono">{recordingStartedAtRef.current ? (Date.now() - recordingStartedAtRef.current) : 0}</span>
+                                </div>
                             </div>
                         )}
+
+                        <div className="text-sm text-gray-300">
+                            <button className="px-2 py-1 mr-2 rounded bg-gray-700 hover:bg-gray-600" onClick={async () => {
+                                try {
+                                    await rn.loadWorklet();
+                                    // request a stream so the worklet can analyze mic audio
+                                    try {
+                                        const s = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                                        rn.connectFromStream(s);
+                                    } catch (e) {
+                                        // If mic permission already held by startMic, connecting a separate stream
+                                        // may be unnecessary. Silently ignore if permission denied here.
+                                    }
+                                } catch (e) {}
+                            }}>
+                                Load RNNoise
+                            </button>
+                            <span>RNNoise: <span className="font-mono">{rn.status}</span></span>
+                            {rn.lastRms !== null && <span className="ml-3">RN_RMS: <span className="font-mono">{rn.lastRms.toFixed(4)}</span></span>}
+                        </div>
 
                         <div className="flex justify-center items-center space-x-2">
                             {/*
@@ -428,7 +499,7 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                             </motion.button>
                             */}
 
-                            <motion.button onClick={() => { stop(); onClose(); }} className="p-2 rounded-md hover:bg-gray-700 flex items-center space-x-2 text-yellow-400 ml-2" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                            <motion.button onClick={() => { try { stop(); } catch {} try { speakingStartedAtRef.current = null } catch {} onClose(); }} className="p-2 rounded-md hover:bg-gray-700 flex items-center space-x-2 text-yellow-400 ml-2" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                                 <FaSignOutAlt className='w-8 h-8' />
                             </motion.button>
                         </div>

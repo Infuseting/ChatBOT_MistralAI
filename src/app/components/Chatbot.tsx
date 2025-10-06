@@ -264,9 +264,9 @@ export default function Chatbot() {
                             </div>
                         </div>
 
-                        <div className="flex items-center space-x-2 bg-gray-800 rounded-md shadow-lg w-full p-4">
-                            <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} handleAudioSend={handleAudioSendWrapper} showAudioModal={showAudioModal} setShowAudioModal={setShowAudioModal} />
-                        </div>
+                        <button onClick={() => { setContextModalOpen(true); setDropdownMenuOpen(false); }} className="w-full text-left p-2 hover:bg-gray-700">Modify Context</button>
+                        <div className="border-t border-gray-700" />
+                        <button onClick={() => { console.log("delete thread"); setDropdownMenuOpen(false); }} className="w-full text-left p-2 text-red-500 hover:bg-gray-700">Delete Thread</button>
                     </div>
                 )}
             </div>

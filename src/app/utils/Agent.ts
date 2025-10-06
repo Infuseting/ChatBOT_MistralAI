@@ -434,11 +434,17 @@ export async function handleMessageSend(thread: Thread, content: string, selecte
     
     const { chatResponse } = await runAgent(thread, userMessage, messagesList, imageGeneration);
     if (!activeRequests.has(thread.id)) return;
+    console.log(chatResponse);
     if (!chatResponse || !chatResponse.outputs || chatResponse.outputs.length === 0) {
+        console.log(chatResponse)
         newMessage.text = `<p class='text-red-500'>${chatResponse.detail[0].msg}</p>`;
         newMessage.thinking = "";
         userMessage.status = 'cancelled';
         newMessage.status = 'cancelled';
+        updateThreadCache(thread);
+        try { setActualThread(thread); } catch (e) {}
+        try { updateActualThread(); } catch (e) {}
+        
         return;
     }
     const { thinking, images } = extractThinkingAndText(chatResponse);
@@ -511,6 +517,9 @@ export async function handleRegenerateMessage(thread : Thread, message: Message,
         newMessage.text = `<p class='text-red-500'>${chatResponse.detail[0].msg}</p>`;
         newMessage.thinking = "";
         newMessage.status = 'cancelled';
+        updateThreadCache(thread);
+        try { setActualThread(thread); } catch (e) {}
+        try { updateActualThread(); } catch (e) {}
         return;
     }
   const { thinking, images } = extractThinkingAndText(chatResponse);
@@ -601,6 +610,9 @@ export async function handleEditMessage(thread : Thread, message: Message, editM
         newMessage.thinking = "";
         newMessage.status = 'cancelled';
         newUserMessage.status = 'cancelled';
+        updateThreadCache(thread);
+        try { setActualThread(thread); } catch (e) {}
+        try { updateActualThread(); } catch (e) {}
         return;
     }
     const { thinking, images } = extractThinkingAndText(chatResponse);
@@ -703,6 +715,9 @@ export async function handleAudioSend(thread: Thread, audioBlob: Blob) {
         newMessage.thinking = "";
         userMessage.status = 'cancelled';
         newMessage.status = 'cancelled';
+        updateThreadCache(thread);
+        try { setActualThread(thread); } catch (e) {}
+        try { updateActualThread(); } catch (e) {}
         return;
     }
     userMessage.text = transcribeAudio;

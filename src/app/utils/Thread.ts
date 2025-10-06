@@ -47,11 +47,11 @@ export function threadExists(id: string) : boolean {
 function isGuest(): boolean {
     try {
         if (typeof window === 'undefined') return false;
-        // Prefer cookie lookup for `is_guest`
+        // If an access_token cookie exists, treat as authenticated.
         const cookie = window.document.cookie || '';
+        if (cookie.includes('access_token=')) return false;
+        // Otherwise, if the server set is_guest=1, treat as guest.
         if (cookie.includes('is_guest=1')) return true;
-        // Fallback: if no access token cookie present, treat as guest
-        if (!cookie.includes('access_token')) return true;
     } catch (e) {}
     return false;
 }

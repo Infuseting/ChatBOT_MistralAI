@@ -15,7 +15,14 @@ export async function middleware(req: NextRequest) {
     // If token is valid, continue normally.
     if (res.status === 200) {
       console.log('[Middleware] Auth OK');
-      return NextResponse.next();
+      // If the user is authenticated, ensure we clear any previous guest
+      // marker so subsequent client checks don't mistakenly treat as guest.
+      const resp = NextResponse.next();
+      try {
+        // Remove the cookie by setting it with Max-Age=0
+        resp.headers.set('set-cookie', 'is_guest=; Path=/; Max-Age=0; SameSite=Lax');
+      } catch (e) {}
+      return resp;
     }
 
     // If token is missing/invalid, allow the request to continue but mark
@@ -27,8 +34,6 @@ export async function middleware(req: NextRequest) {
     const resp = NextResponse.next();
     // Set a client-readable guest cookie so frontend can quickly detect guest
     // sessions. Keep it simple and non-sensitive.
-    // Use a header if cookies are already present; headers.set('set-cookie',..) is
-    // compatible in Next middleware runtime.
     try {
       resp.headers.set('set-cookie', 'is_guest=1; Path=/; SameSite=Lax');
     } catch (e) {

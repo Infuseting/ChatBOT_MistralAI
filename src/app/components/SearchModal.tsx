@@ -2,9 +2,8 @@
 
 import { motion } from "motion/react";
 import { FaTimes } from 'react-icons/fa';
-import { useState, useEffect } from 'react';
-import { getActualThread, getThreads, selectThreadById, setActualThread } from "../utils/Thread";
-import { ensureDate } from '../utils/DateUTC';
+import { useState } from 'react';
+import { getActualThread,setActualThread } from "../utils/Thread";
 import ConversationsList from './ThreadsList';
 const MotionFaTimes = motion(FaTimes);
 

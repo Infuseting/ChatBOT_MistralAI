@@ -1,13 +1,12 @@
-import { getActualThread, Thread, setActualThread, updateActualThread, updateAllThreadsList, fetchThreadMessagesPage, loadOlderMessages } from "../utils/Thread";
+import { getActualThread, Thread, loadOlderMessages } from "../utils/Thread";
 import { Message } from "../utils/Message";
-import { parseMarkdown, isAtRightmostBranch } from "../utils/ChatMessagesHelper";
+import { parseMarkdown } from "../utils/ChatMessagesHelper";
 import { FaCopy, FaEdit, FaSync, FaTimes } from "react-icons/fa";
 import { getFastModelList, getActualModel } from '../utils/Models';
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/react-dom';
 import { showErrorToast, showSuccessToast } from "../utils/toast";
 import { handleEditMessage, handleRegenerateMessage } from "../utils/Agent";
-import { updateThreadCache } from "../utils/ThreadCache";
 
 // find nearest ancestor that can scroll (has overflow and scrollHeight > clientHeight)
 function findNearestScrollableAncestor(el: HTMLElement | null): HTMLElement | null {

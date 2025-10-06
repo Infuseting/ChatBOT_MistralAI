@@ -1,6 +1,5 @@
 import { Mistral } from "@mistralai/mistralai"
 import { Message } from "./Message"
-import { Thread } from "./Thread"
 import { getApiKey } from "./ApiKey"
 
 export type Attachment = {

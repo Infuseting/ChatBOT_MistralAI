@@ -1,10 +1,10 @@
 import { getContext } from './Context';
 import { getHistory, getLastMessage, Message, Messages } from './Message';
-import { getAvailableModelList, getActualModel } from './Models';
+import { getActualModel } from './Models';
 import { Mistral } from '@mistralai/mistralai';
 import { getApiKey } from './ApiKey';
-import { showErrorToast, showSuccessToast } from './toast';
-import { utcNow, utcNowPlus, ensureIso, ensureDate, parseToUtc } from './DateUTC';
+import { showErrorToast } from './toast';
+import { utcNow, ensureIso, ensureDate, parseToUtc } from './DateUTC';
 import { readThreadCache, setThreadCache } from './ThreadCache';
 import { generateUUID } from './crypto';
 type Thread = { id: string; name: string, date?: Date, messages?: Messages, status?: 'local' | 'remote' | 'unknown', context : string, model?: string, share: boolean };

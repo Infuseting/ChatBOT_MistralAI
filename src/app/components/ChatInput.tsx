@@ -1,8 +1,8 @@
 "use client"
 import React, { useEffect, useRef, useId, useState } from 'react';
-import { cancelActiveRequest, isRequestActive } from '../utils/DynamicMessage';
+import { isRequestActive } from '../utils/DynamicMessage';
 import { FaPlus, FaMicrophone, FaPaperPlane, FaImage } from 'react-icons/fa';
-import { showErrorToast, showSuccessToast } from "../utils/toast";
+import { showErrorToast } from "../utils/toast";
 import AudioSpectrumModal from './AudioSpectrumModal';
 import { Thread } from '../utils/Thread';
 import { FaTimes } from 'react-icons/fa';

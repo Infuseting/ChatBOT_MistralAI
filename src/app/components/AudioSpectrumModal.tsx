@@ -1,9 +1,9 @@
 "use client";
 
-import { FaTimes, FaMicrophoneSlash, FaSignOutAlt } from 'react-icons/fa';
+import { FaTimes, FaSignOutAlt } from 'react-icons/fa';
 import { motion } from 'motion/react';
-import { useEffect, useRef, useState } from 'react';
-import useAudioAnalyzer, { playTTSForText, analyzerController } from '../utils/useAudioAnalyzer';
+import { useEffect, useRef } from 'react';
+import useAudioAnalyzer, { analyzerController } from '../utils/useAudioAnalyzer';
 import { VAD_CONFIG, computeThresholds } from '../utils/vadConfig';
 import { showErrorToast } from "../utils/toast";
 import { Thread } from '../utils/Thread';

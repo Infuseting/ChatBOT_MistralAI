@@ -13,7 +13,6 @@ import Keybinds from '../utils/Keybinds';
 import { setActualThread } from "../utils/Thread";
 import { motion } from "motion/react";
 import { newThread, getActualThread } from '../utils/Thread';
-import { ensureDate } from '../utils/DateUTC';
 import ConversationsList from './ThreadsList';
 
 /**

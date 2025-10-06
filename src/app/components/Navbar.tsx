@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/react-dom';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { FaPlus, FaPencilAlt } from "react-icons/fa";
 import { TbLayoutSidebarLeftCollapse, TbLayoutSidebarLeftExpand } from "react-icons/tb";
 import { FaMagnifyingGlass, FaDoorOpen } from "react-icons/fa6";
@@ -252,7 +253,7 @@ export default function Navbar() {
                     </div>
                 ) : user === null ? (
                     <div className="w-full p-2">
-                        <a href="/login" className="w-full inline-block text-center bg-indigo-600 hover:bg-indigo-700 text-white py-2 px-3 rounded">Se connecter</a>
+                        <Link href="/login" className="w-full inline-block text-center bg-indigo-600 hover:bg-indigo-700 text-white py-2 px-3 rounded">Se connecter</Link>
                     </div>
                 ) : (
                     <>

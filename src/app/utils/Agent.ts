@@ -311,29 +311,53 @@ async function updateAgent(thread: Thread, userMessage : Message, librariesId : 
 }
 
 async function runAgent(thread: Thread, userMessage: Message, messagesList: any[] = [], imageGeneration : boolean = false, audio : boolean = false) {
+  try {
     if (!(await existAgent())) await createAgent();
-    const librariesId = await getLibrariesId(userMessage);
-    const updatedAgent = await updateAgent(thread, userMessage, librariesId ?? [], imageGeneration, audio);
-    if (!updatedAgent || !updatedAgent.id) {
-        console.error('No agent available to start the conversation. Aborting start call.', { updatedAgent });
-        return { chatResponse: null, attachmentId: librariesId ?? null };
-    }
+  } catch (err) {
+    console.error('Failed to ensure agent exists', err);
+    return { chatResponse: { detail: [{ msg: String(err) }] }, attachmentId: null };
+  }
+
+  let librariesId = null;
+  try {
+    librariesId = await getLibrariesId(userMessage);
+  } catch (err) {
+    console.error('getLibrariesId failed', err);
+    // continue with null librariesId but return structured error to caller
+    return { chatResponse: { detail: [{ msg: String(err) }] }, attachmentId: null };
+  }
+
+  let updatedAgent: any = null;
+  try {
+    updatedAgent = await updateAgent(thread, userMessage, librariesId ?? [], imageGeneration, audio);
+  } catch (err) {
+    console.error('updateAgent failed', err);
+    return { chatResponse: { detail: [{ msg: String(err) }] }, attachmentId: librariesId ?? null };
+  }
+
+  if (!updatedAgent || !updatedAgent.id) {
+    console.error('No agent available to start the conversation. Aborting start call.', { updatedAgent });
+    return { chatResponse: { detail: [{ msg: 'No agent available to start the conversation' }] }, attachmentId: librariesId ?? null };
+  }
     
 
     let chatResponse: any = null;
-    try {
-        const debugClient = new Mistral({ apiKey: getApiKey(), debugLogger: console });
-        console.log('Starting conversation with agentId', updatedAgent.id, 'and inputs', messagesList);
-        chatResponse = await debugClient.beta.conversations.start({
-            agentId: updatedAgent.id,
-            inputs: [
-                ...messagesList
-            ]
-        });
-        console.log('chatResponse', chatResponse);
-    } catch (err) {
-        return { chatResponse: {"detail": [{"msg": err}]}, attachmentId: librariesId ?? null };
-    }
+  try {
+    const debugClient = new Mistral({ apiKey: getApiKey(), debugLogger: console });
+    console.log('Starting conversation with agentId', updatedAgent.id, 'and inputs', messagesList);
+    chatResponse = await debugClient.beta.conversations.start({
+      agentId: updatedAgent.id,
+      inputs: [
+        ...messagesList
+      ]
+    });
+    console.log('chatResponse', chatResponse);
+  } catch (err: any) {
+    console.error('Conversation start failed', err);
+    // Normalize SDK errors into the same structured shape used elsewhere
+    const msg = err?.message ?? String(err);
+    return { chatResponse: { detail: [{ msg }] }, attachmentId: librariesId ?? null };
+  }
     
 
     return { chatResponse, attachmentId: librariesId ?? null };

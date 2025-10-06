@@ -151,27 +151,67 @@ src/
 
 ## API Reference
 
-High-level endpoints (see `src/app/api`):
+The project exposes a set of Next.js API routes under `src/app/api`. Below are the main endpoints and a short description of their behavior. All server-side tokens used by these routes are stored in the database and may be supplied either via the `Authorization: Bearer <token>` header or the `access_token` httpOnly cookie.
 
-- `POST /api/auth/google/token` — Exchange Google `id_token`, create a server access token, and set it as an HTTP-only cookie.
-- `POST /api/auth/logout` — Revoke token (delete from DB) and clear the cookie.
-- `GET /api/auth/validate` — Validate `access_token` against the database (used by middleware).
-- `GET /api/user` — Returns the current user (via cookie or Authorization header).
-- `GET/POST /api/thread` — List and create threads (protected).
+- `POST /api/auth/google/token` — Exchange a Google OAuth `access_token` (obtained on the client) for a server-side access token. Verifies Google tokeninfo, upserts the user by `googleId`, and sets a secure, httpOnly `access_token` cookie on success.
+- `POST /api/auth/logout` — Logs out the current user: deletes the server-side token(s) matching the provided token and clears the `access_token` cookie.
+- `DELETE /api/auth/delete` — Permanently deletes the authenticated user's account and related data (messages, threads, shares, tokens). Requires authentication.
+- `POST /api/auth/email/login` — Email/password login. Accepts `{ email, password }` JSON body. On success returns `{ ok: true }` and sets an `access_token` cookie.
+- `POST /api/auth/email/register` — Email/password registration. Accepts `{ email, password, name? }`. Creates a user (provider = 'MDP'), issues an `access_token` cookie on success.
+- `GET /api/auth/validate` — Validates the provided server-side token and returns `{ ok: true }` when valid. Useful for middleware and client-side checks.
+
+- `GET /api/user` — Returns basic profile information for the authenticated user (id, name, picture). Requires a valid server token.
+
+- `GET /api/thread` — Multi-purpose GET that supports:
+  - `?shareCode=CODE` — Return a publicly-shared thread by share code (no auth required).
+  - `?idThread=ID` — Return a specific thread and its messages if the requester is the owner (requires auth). Supports `limit` and `before` for paginated message loading.
+  - no query params — List threads for the authenticated user (supports `limit` and `before`).
+
+- `POST /api/thread` — Multi-action endpoint. The request JSON should include an `action` field with one of the following values:
+  - `create` — Create a new thread. Body: `{ action: 'create', data: { ... } }`. Requires auth.
+  - `share` — Create or fetch a share code for an owned thread. Body: `{ action: 'share', idThread }`. Requires auth and ownership.
+  - `sync` — Bulk-insert/sync messages for existing threads (used for imports/sync). Body: `{ action: 'sync', messages: [...] }`. Only inserts messages that target known threads and are permitted (owner or shared).
+  - `update` — Update thread metadata (name, context, model). Body: `{ action: 'update', idThread, data: { ... } }`. Requires auth and ownership.
+
+- `POST /api/tts` — Server-side TTS proxy. Supports two actions in the body:
+  - `{ validate: true }` — Validates the server TTS API key with the provider.
+  - `{ text: string, lang?: string }` — Generates audio (mp3) via the configured provider and returns audio bytes (`Content-Type: audio/mpeg`). Uses the server's configured TTS API key.
+
+Notes:
+- Many endpoints accept the server-side token via `Authorization: Bearer <token>` or the `access_token` cookie. The cookie is httpOnly and set on successful login/registration.
+- Error responses follow a JSON shape like `{ error: 'Message' }` and appropriate HTTP status codes (401 for auth failures, 400 for bad requests, 500 for server errors).
 
 ---
 
 ## Authentication Flow
 
-1. Client obtains an `id_token` from Google sign-in.
-2. Client sends the `id_token` to `/api/auth/google/token`.
-3. The server verifies the token with Google, upserts the user, creates an `accessToken` record, 
-   and sets the `access_token` cookie (HTTP-only and secure).
-4. Middleware and API routes read the cookie or Authorization header and validate the token against the database.
+There are two primary sign-in flows supported by the app: Google OAuth and traditional email/password. Both flows result in a server-side access token which is persisted in the database and returned to the client as a secure, httpOnly cookie (`access_token`). API routes and middleware validate requests using this server-side token.
 
-**Security Notes:**  
-- Access tokens are stored server-side and sent as HTTP-only cookies to reduce XSS risk.  
-- For high-scale deployments, consider signed JWTs so middleware can validate tokens without DB lookups.
+Google OAuth:
+
+- The client obtains a Google OAuth `access_token` on the client (via Google Sign-In).
+- The client POSTs `{ access_token }` to `/api/auth/google/token`.
+- The server verifies the token with Google's tokeninfo endpoint, upserts the user by `googleId`, creates a local server-side access token in the DB, and sets an httpOnly `access_token` cookie on success.
+
+Email/password:
+
+- The client POSTs `{ email, password }` to `/api/auth/email/login` to sign in. If successful, the server creates a server-side access token and sets the `access_token` cookie.
+- New users can register via `POST /api/auth/email/register` with `{ email, password, name? }`, which creates the user and issues the cookie.
+
+Logout / token management:
+
+- `POST /api/auth/logout` deletes server-side token(s) that match the supplied token and clears the cookie.
+- `DELETE /api/auth/delete` performs a destructive deletion of the authenticated user's account and related data (requires authentication).
+
+Token usage:
+
+- API routes accept the server token either as `Authorization: Bearer <token>` or via the `access_token` httpOnly cookie. The cookie is preferred in browser flows to avoid exposing tokens to JS.
+
+Security Notes:
+
+- Access tokens are stored server-side and sent as httpOnly cookies to reduce XSS risk.
+- The server-side tokens are short-lived by design (if `expiresAt` is set) and validated against the DB by `GET /api/auth/validate`.
+- For very large deployments, consider switching to signed JWTs or an introspection-capable auth layer to avoid DB lookups in hot paths.
 
 ---
 

@@ -269,7 +269,7 @@ async function getAgent() {
 
 
 
-async function updateAgent(thread: Thread, userMessage : Message, librariesId : string[], imageGeneration : boolean = false, audio : boolean = false) {
+async function updateAgent(thread: Thread, userMessage : Message, librariesId : string[], imageGeneration : boolean = false, audio : boolean = false): Promise<any> {
     const client = new Mistral({apiKey: getApiKey()});
     
     const text = String(userMessage?.text ?? '').trim();
@@ -288,7 +288,7 @@ async function updateAgent(thread: Thread, userMessage : Message, librariesId : 
         }
         agent = await getAgent();
     }
-    if (!agent || !agent.id) {
+    if (!agent || !(agent as any).id) {
         throw new Error('Agent not available');
     }
 
@@ -298,14 +298,21 @@ async function updateAgent(thread: Thread, userMessage : Message, librariesId : 
     if (needImageGeneration) tools.push({ type: "image_generation" });
     if (needFileTool) tools.push({ type: "document_library", libraryIds: [...librariesId] });
     console.log(tools)
-    const websearchAgent = await client.beta.agents.update({
-        agentId: agent.id,
-        agentUpdateRequest: {
-            model: thread.model ?? getActualModel(),
-            instructions: `${audio ? 'You are in a phone conversation with a human. You need to answer their questions and help them. Keep your answers short and to the point. \n\n' : ''} ${thread.context}` || getContext() || "You are a helpful assistant.",
-            tools
-        },
-    });
+    let websearchAgent: any;
+    try {
+       websearchAgent = await client.beta.agents.update({
+          agentId: (agent as any).id,
+          agentUpdateRequest: {
+              model: thread.model ?? getActualModel(),
+              instructions: `${audio ? 'You are in a phone conversation with a human. You need to answer their questions and help them. Keep your answers short and to the point. \n\n' : ''} ${thread.context}` || getContext() || "You are a helpful assistant.",
+              tools
+          },
+      });
+    } catch (e) {
+      console.error('Error updating agent:', e);
+      websearchAgent = e;
+      
+    }
     return websearchAgent;
     
 }

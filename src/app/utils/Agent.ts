@@ -269,7 +269,7 @@ async function getAgent() {
 
 
 
-async function updateAgent(thread: Thread, userMessage : Message, librariesId : string[], imageGeneration : boolean = false, audio : boolean = false) {
+async function updateAgent(thread: Thread, userMessage : Message, librariesId : string[], imageGeneration : boolean = false, audio : boolean = false): Promise<any> {
     const client = new Mistral({apiKey: getApiKey()});
     
     const text = String(userMessage?.text ?? '').trim();
@@ -288,7 +288,7 @@ async function updateAgent(thread: Thread, userMessage : Message, librariesId : 
         }
         agent = await getAgent();
     }
-    if (!agent || !agent.id) {
+    if (!agent || !(agent as any).id) {
         throw new Error('Agent not available');
     }
 
@@ -298,14 +298,21 @@ async function updateAgent(thread: Thread, userMessage : Message, librariesId : 
     if (needImageGeneration) tools.push({ type: "image_generation" });
     if (needFileTool) tools.push({ type: "document_library", libraryIds: [...librariesId] });
     console.log(tools)
-    const websearchAgent = await client.beta.agents.update({
-        agentId: agent.id,
-        agentUpdateRequest: {
-            model: thread.model ?? getActualModel(),
-            instructions: `${audio ? 'You are in a phone conversation with a human. You need to answer their questions and help them. Keep your answers short and to the point. \n\n' : ''} ${thread.context}` || getContext() || "You are a helpful assistant.",
-            tools
-        },
-    });
+    let websearchAgent: any;
+    try {
+       websearchAgent = await client.beta.agents.update({
+          agentId: (agent as any).id,
+          agentUpdateRequest: {
+              model: thread.model ?? getActualModel(),
+              instructions: `${audio ? 'You are in a phone conversation with a human. You need to answer their questions and help them. Keep your answers short and to the point. \n\n' : ''} ${thread.context}` || getContext() || "You are a helpful assistant.",
+              tools
+          },
+      });
+    } catch (e) {
+      console.error('Error updating agent:', e);
+      websearchAgent = e;
+      
+    }
     return websearchAgent;
     
 }
@@ -313,19 +320,27 @@ async function updateAgent(thread: Thread, userMessage : Message, librariesId : 
 async function runAgent(thread: Thread, userMessage: Message, messagesList: any[] = [], imageGeneration : boolean = false, audio : boolean = false) {
     if (!(await existAgent())) await createAgent();
     const librariesId = await getLibrariesId(userMessage);
-    const updatedAgent = await updateAgent(thread, userMessage, librariesId ?? [], imageGeneration, audio);
-    if (!updatedAgent || !updatedAgent.id) {
+    let updatedAgent: any = null;
+    try {
+
+      updatedAgent = await updateAgent(thread, userMessage, librariesId ?? [], imageGeneration, audio);
+    }
+    catch (e) {
+        console.error('Error updating agent:', e);
+        return { chatResponse: {"detail": [{"msg": "Erreur lors de la mise à jour de l'agent. Veuillez réessayer."}]}, attachmentId: librariesId ?? null };
+    }
+    if (!updatedAgent || !updatedAgent?.id) {
         console.error('No agent available to start the conversation. Aborting start call.', { updatedAgent });
-        return { chatResponse: null, attachmentId: librariesId ?? null };
+        return { chatResponse: {"detail": [{"msg": (updatedAgent as any)?.message }]}, attachmentId: librariesId ?? null };
     }
     
 
     let chatResponse: any = null;
     try {
         const debugClient = new Mistral({ apiKey: getApiKey(), debugLogger: console });
-        console.log('Starting conversation with agentId', updatedAgent.id, 'and inputs', messagesList);
+        console.log('Starting conversation with agentId', (updatedAgent as any).id, 'and inputs', messagesList);
         chatResponse = await debugClient.beta.conversations.start({
-            agentId: updatedAgent.id,
+            agentId: (updatedAgent as any).id,
             inputs: [
                 ...messagesList
             ]

@@ -81,7 +81,7 @@ Use you're voice to talk with AI.
 
 **Image Generation**
 Generate image from text or other image
-![Image Generation](readme/image_generation.png)
+![Image Generation](readme/image_generator.png)
 
 ---
 

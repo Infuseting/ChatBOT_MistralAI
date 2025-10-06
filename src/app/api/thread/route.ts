@@ -2,25 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { ensureDate } from '@/app/utils/DateUTC';
 
-/**
- * Small helper: generate a UUID string.
- *
- * Uses the platform crypto.randomUUID when available; otherwise falls back
- * to a RFC4122 v4-like pseudo-random implementation.
- */
-function generateUUID(): string {
-  try {
-    const rnd = (globalThis as any).crypto?.randomUUID;
-    if (typeof rnd === 'function') return rnd();
-  } catch (e) {
-    // ignore and fall back
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
 
 /**
  * GET /api/thread

@@ -11,27 +11,22 @@ import { Thread } from '../utils/Thread';
 type Props = {
     onClose: () => void;
     thread?: Thread | null;
-    // handleAudioSend accepts either a pre-existing data URL / URL string (legacy)
-    // or an actual audio Blob. The Agent expects a Blob so this component will
-    // send a Blob when available.
     handleAudioSend?: (thread: Thread, value: Blob | string) => Promise<void> | void;
 }
 
 export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }: Props) {
-    const { data, rms, noiseFloor, ambientNoise, startMic, startFromAudioElement, stop, muted, toggleMute } = useAudioAnalyzer();
+    const { data, rms, noiseFloor, ambientNoise, startMic, stop, muted} = useAudioAnalyzer();
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const recordingStreamRef = useRef<MediaStream | null>(null);
     const recordChunksRef = useRef<Blob[]>([]);
     const recordingStartedAtRef = useRef<number | null>(null);
-    const [currentTranscript, setCurrentTranscript] = useState('');
     const lastSpeechAtRef = useRef<number>(0);
     const speakingRef = useRef(false);
     const speakingStartedAtRef = useRef<number | null>(null);
     const inSpeechSessionRef = useRef<boolean>(false);
     const preSpeechNoiseRef = useRef<number>(0);
     const processingRef = useRef(false);
-    const playingAudioRef = useRef<HTMLAudioElement | null>(null);
     const mutedRef = useRef(muted);
     // SpeechRecognition removed: we rely solely on RMS/EMA from the analyzer
     const silenceSendTimeoutRef = useRef<number | null>(null);
@@ -432,8 +427,6 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
             }
         } finally {
             processingRef.current = false;
-            // Nothing to restart (SpeechRecognition removed).
-            setCurrentTranscript('');
         }
     }
 

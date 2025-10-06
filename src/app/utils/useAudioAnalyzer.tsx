@@ -376,35 +376,6 @@ export default function useAudioAnalyzer() {
         setData(null);
     }
 
-    function toggleMute() {
-        const next = !muted;
-        setMuted(next);
-        if (next) {
-            // muting: stop audio processing
-            stop();
-            return;
-        }
-        // unmuting: restart last source if any
-        (async () => {
-            try {
-                // small delay to ensure previous context closed
-                await new Promise(r => setTimeout(r, 50));
-                const last = lastSourceRef.current;
-                if (!last) {
-                    // nothing to restart
-                    return;
-                }
-                if (last.type === 'mic') {
-                    await startMic();
-                } else if (last.type === 'audio') {
-                    // if audio element is available, restart from it
-                    try { await startFromAudioElement(last.audioEl); } catch (e) { /* ignore */ }
-                }
-            } catch (e) {
-                // ignore start errors
-            }
-        })();
-    }
 
     // expose current hook instance to module-level controller so playTTSForText can use it
     useEffect(() => {
@@ -439,5 +410,5 @@ export default function useAudioAnalyzer() {
         return () => { analyzerController = null; };
     }, [startFromAudioElement, stop, startMic]);
 
-    return { data, rms, noiseFloor, ambientNoise, startMic, startFromAudioElement, stop, muted, toggleMute } as const;
+    return { data, rms, noiseFloor, ambientNoise, startMic, startFromAudioElement, stop, muted } as const;
 }

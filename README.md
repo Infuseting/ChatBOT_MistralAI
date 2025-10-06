@@ -75,6 +75,14 @@ choose models from a fast list, and define a default model for all threads.
 Quickly modify the context and model for the current thread.  
 ![Fast Config Page](readme/config.png)
 
+**Voice call**
+Use you're voice to talk with AI.
+![Voice Call](readme/voice_call.png)
+
+**Image Generation**
+Generate image from text or other image
+![Image Generation](readme/image_generation.png)
+
 ---
 
 ## Prerequisites

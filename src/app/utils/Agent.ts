@@ -344,7 +344,7 @@ async function runAgent(thread: Thread, userMessage: Message, messagesList: any[
 
   if (!updatedAgent || !updatedAgent.id) {
     console.error('No agent available to start the conversation. Aborting start call.', { updatedAgent });
-    return { chatResponse: { detail: [{ msg: 'No agent available to start the conversation' }] }, attachmentId: librariesId ?? null };
+    return { chatResponse: { detail: [{ msg: updatedAgent }] }, attachmentId: librariesId ?? null };
   }
     
 

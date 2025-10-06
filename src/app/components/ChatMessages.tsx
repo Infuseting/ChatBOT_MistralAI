@@ -1,4 +1,4 @@
-import { getActualThread, Thread, setActualThread, updateActualThread, updateAllThreadsList } from "../utils/Thread";
+import { getActualThread, Thread, setActualThread, updateActualThread, updateAllThreadsList, fetchThreadMessagesPage, loadOlderMessages } from "../utils/Thread";
 import { Message } from "../utils/Message";
 import { parseMarkdown, isAtRightmostBranch } from "../utils/ChatMessagesHelper";
 import { FaCopy, FaEdit, FaSync, FaTimes } from "react-icons/fa";
@@ -8,6 +8,21 @@ import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/react
 import { showErrorToast, showSuccessToast } from "../utils/toast";
 import { handleEditMessage, handleRegenerateMessage } from "../utils/Agent";
 import { updateThreadCache } from "../utils/ThreadCache";
+
+// find nearest ancestor that can scroll (has overflow and scrollHeight > clientHeight)
+function findNearestScrollableAncestor(el: HTMLElement | null): HTMLElement | null {
+    try {
+        let node: HTMLElement | null = el;
+        while (node) {
+            const style = window.getComputedStyle(node);
+            const overflowY = style.getPropertyValue('overflow-y');
+            if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) return node;
+            if (node.parentElement) node = node.parentElement as HTMLElement | null;
+            else break;
+        }
+    } catch (e) {}
+    return null;
+}
 
 /**
  * ChatMessages component
@@ -227,6 +242,63 @@ export default function ChatMessages({ thread, onNewestBranchChange }: { thread:
         });
         setRefreshToggle(v => !v);
     }
+
+    // Lazy-load older messages when scrolling to top
+    const loadingOlderRef = useRef(false);
+    useEffect(() => {
+        const el = rootRef.current;
+        if (!el) return;
+        async function onScroll() {
+            try {
+                if (!el) return;
+                if (el.scrollTop > 120) return; // only trigger when near top
+                if (loadingOlderRef.current) return;
+                // determine oldest message timestamp
+                const msgs = (await getActualThread())?.messages ?? [];
+                if (!msgs || msgs.length === 0) return;
+                const oldest = msgs.reduce((acc, m) => {
+                    const t = m.timestamp instanceof Date ? m.timestamp.getTime() : Number(m.timestamp || 0);
+                    return (acc === 0 || t < acc) ? t : acc;
+                }, 0);
+                if (!oldest) return;
+                loadingOlderRef.current = true;
+                try {
+                    const beforeIso = new Date(oldest).toISOString();
+                    // preserve scroll container
+                    const scroller = rootRef.current ? findNearestScrollableAncestor(rootRef.current) : null;
+                    const prevScrollHeight = scroller ? scroller.scrollHeight : null;
+                    const prevScrollTop = scroller ? scroller.scrollTop : null;
+
+                    const page = await loadOlderMessages(thread.id, beforeIso, 50);
+                    if (page && page.ok && Array.isArray(page.messages) && page.messages.length > 0) {
+                        // Update local messages state by re-reading the actual thread and applying a merge
+                        const updatedThread = await getActualThread();
+                        const newMessages = (updatedThread?.messages ?? []).slice(0, page.messages.length);
+                        // restore scroll after state update
+                        setMessages(prev => {
+                            const next = [...newMessages, ...prev.filter(m => !newMessages.some(n => n.id === m.id))];
+                            requestAnimationFrame(() => {
+                                try {
+                                    if (!scroller || prevScrollHeight == null || prevScrollTop == null) return;
+                                    const addedHeight = (scroller.scrollHeight - prevScrollHeight) || 0;
+                                    scroller.scrollTop = prevScrollTop + addedHeight;
+                                } catch (e) {}
+                            });
+                            return next;
+                        });
+                    }
+                } catch (e) {
+                    console.error('Failed to load older messages', e);
+                } finally {
+                    loadingOlderRef.current = false;
+                }
+            } catch (e) {
+                // ignore
+            }
+        }
+        el.addEventListener('scroll', onScroll, { passive: true });
+        return () => el.removeEventListener('scroll', onScroll);
+    }, [thread.id]);
 
     // Wait until getActualThread returns a thread containing a message with targetId
     // Polls until timeout and updates local messages when seen.

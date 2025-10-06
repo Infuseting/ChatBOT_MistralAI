@@ -20,9 +20,14 @@ type Props = {
     handleMessageSend: (thread: Thread, value: string, files?: File[], imageGeneration?: boolean) => Promise<void> | void;
     // FIXED: accept both Blob and string (AudioSpectrumModal may send a Blob)
     handleAudioSend?: (thread: Thread, value: Blob | string) => Promise<void> | void;
+    // Optional external control for the audio modal. If provided, ChatInput will
+    // use these instead of internal local state so the modal can persist across
+    // parent-driven remounts.
+    showAudioModal?: boolean;
+    setShowAudioModal?: (v: boolean) => void;
 };
 
-export default function ChatInput({ actualThread, isNewestBranch, isShareThread, handleMessageSend, handleAudioSend }: Props) {
+export default function ChatInput({ actualThread, isNewestBranch, isShareThread, handleMessageSend, handleAudioSend, showAudioModal: showAudioModalProp, setShowAudioModal: setShowAudioModalProp }: Props) {
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const uid = useId();
     const fileInputId = `chat-file-input-${uid}`;
@@ -30,7 +35,13 @@ export default function ChatInput({ actualThread, isNewestBranch, isShareThread,
     type SelectedFile = { file: File; previewUrl?: string };
     const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
     const [imageGenerationMode, setImageGenerationMode] = useState(false);
-    const [showAudioModal, setShowAudioModal] = useState(false);
+    // Support optional controlled modal state (lifted to parent) to avoid
+    // losing the modal when ChatInput is remounted. If parent provides
+    // `showAudioModal`/`setShowAudioModal`, use those; otherwise fall back to
+    // internal state.
+    const [internalShowAudioModal, setInternalShowAudioModal] = useState(false);
+    const showAudioModal = typeof showAudioModalProp === 'boolean' ? showAudioModalProp : internalShowAudioModal;
+    const setShowAudioModal = typeof setShowAudioModalProp === 'function' ? setShowAudioModalProp : setInternalShowAudioModal;
     const [ttsKeyValid, setTtsKeyValid] = useState<boolean | null>(null); // null = loading, true/false = validated
 
     const MAX_FILES = 10;

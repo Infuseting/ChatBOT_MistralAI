@@ -199,6 +199,8 @@ High-level endpoints (see `src/app/api`):
 | Keybinds | ❌ | ❌ | ❌ |
 | Comments & Docs | ✅ | ✅ | ✅ |
 | Project Classification | ❌ | ❌ | ❌ |
+| Lazy load | ✅ | ✅ | ✅ |
+
 
 ---
 

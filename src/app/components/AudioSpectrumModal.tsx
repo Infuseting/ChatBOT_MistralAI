@@ -4,7 +4,6 @@ import { FaTimes, FaMicrophoneSlash, FaSignOutAlt } from 'react-icons/fa';
 import { motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import useAudioAnalyzer, { playTTSForText, analyzerController } from '../utils/useAudioAnalyzer';
-import useRNNoise from '../hooks/useRNNoise';
 import { VAD_CONFIG, computeThresholds } from '../utils/vadConfig';
 import { showErrorToast } from "../utils/toast";
 import { Thread } from '../utils/Thread';
@@ -20,7 +19,6 @@ type Props = {
 
 export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }: Props) {
     const { data, rms, noiseFloor, ambientNoise, startMic, startFromAudioElement, stop, muted, toggleMute } = useAudioAnalyzer();
-    const rn = useRNNoise();
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const recordingStreamRef = useRef<MediaStream | null>(null);
@@ -455,7 +453,15 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
 
                 <div className="flex-1 p-4 w-full min-h-0 flex flex-col">
                     <div className="flex-1 w-full min-h-0 p-2 rounded-md">
-                        <canvas ref={canvasRef} className="w-full h-full" onClick={() => { void sendRecordedAudio(); }} />
+                        <canvas
+                            ref={canvasRef}
+                            className="w-full h-full"
+                            onClick={() => {
+                                // Force an immediate end-of-message send when user clicks canvas.
+                                try { if (silenceSendTimeoutRef.current) { clearTimeout(silenceSendTimeoutRef.current); silenceSendTimeoutRef.current = null; } } catch (e) {}
+                                try { void sendRecordedAudio(); } catch (e) {}
+                            }}
+                        />
                     </div>
 
                     <div className="flex flex-col items-center mt-3 space-y-2">
@@ -463,34 +469,8 @@ export default function AudioSpectrumModal({ onClose, thread, handleAudioSend }:
                             <div className="text-sm text-gray-300">
                                 Level: <span className="font-mono">{rms.toFixed(3)}</span>{' '}
                                 Noise: <span className="font-mono">{noiseFloor.toFixed(3)}</span>
-                                <div className="mt-2 text-xs text-gray-400">
-                                    Speaking: <span className="font-mono">{speakingRef.current ? 'yes' : 'no'}</span>{' '}
-                                    Recording: <span className="font-mono">{mediaRecorderRef.current?.state ?? 'idle'}</span>{' '}
-                                    RecordedMs: <span className="font-mono">{recordingStartedAtRef.current ? (Date.now() - recordingStartedAtRef.current) : 0}</span>
-                                </div>
                             </div>
                         )}
-
-                        <div className="text-sm text-gray-300">
-                            <button className="px-2 py-1 mr-2 rounded bg-gray-700 hover:bg-gray-600" onClick={async () => {
-                                try {
-                                    await rn.loadWorklet();
-                                    // request a stream so the worklet can analyze mic audio
-                                    try {
-                                        const s = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                                        rn.connectFromStream(s);
-                                    } catch (e) {
-                                        // If mic permission already held by startMic, connecting a separate stream
-                                        // may be unnecessary. Silently ignore if permission denied here.
-                                    }
-                                } catch (e) {}
-                            }}>
-                                Load RNNoise
-                            </button>
-                            <span>RNNoise: <span className="font-mono">{rn.status}</span></span>
-                            {rn.lastRms !== null && <span className="ml-3">RN_RMS: <span className="font-mono">{rn.lastRms.toFixed(4)}</span></span>}
-                        </div>
-
                         <div className="flex justify-center items-center space-x-2">
                             {/*
                                 Uncomment to enable mute toggle

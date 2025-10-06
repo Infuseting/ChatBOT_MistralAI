@@ -85,7 +85,31 @@ export async function GET(_req: NextRequest) {
         const user = await resolveUserFromRequest(_req);
         if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
 
-  const thread = await prisma.thread.findUnique({ where: { idThread: idThread }, include: { messages: { include: { attachments: { include: { data: true } } } } } });
+        // If `limit` or `before` query params are provided, return a paginated
+        // page of messages rather than the full thread blob. This allows the
+        // client to lazy-load messages on scroll.
+        const limitParam = Number(_req.nextUrl.searchParams.get('limit') ?? '') || null;
+        const beforeParam = _req.nextUrl.searchParams.get('before') ?? null; // ISO timestamp
+        if (limitParam) {
+          const limit = Math.max(1, Math.min(200, limitParam));
+          const where: any = { idThread: idThread };
+          if (beforeParam) where.sentAt = { lt: new Date(beforeParam) };
+          const msgs = await prisma.message.findMany({ where, include: { attachments: { include: { data: true } } }, orderBy: { sentAt: 'desc' }, take: limit });
+          // return messages in chronological order (oldest first)
+          const mapped = msgs.reverse().map(m => ({
+            idMessage: m.idMessage,
+            id: m.id,
+            text: m.text,
+            thinking: m.thinking,
+            sender: m.sender,
+            timestamp: m.sentAt,
+            parentId: m.parentId,
+            attachments: m.attachments ?? []
+          }));
+          return NextResponse.json({ ok: true, messages: mapped });
+        }
+
+        const thread = await prisma.thread.findUnique({ where: { idThread: idThread }, include: { messages: { include: { attachments: { include: { data: true } } } } } });
         if (!thread) return NextResponse.json({ error: 'Thread not found' }, { status: 404 });
         if (thread.userId !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
@@ -106,8 +130,15 @@ export async function GET(_req: NextRequest) {
     }
 
     // 3) Default: list threads for the authenticated user
+    // Support pagination using `limit` and `before` (ISO timestamp). By default
+    // messages are NOT included to keep the thread list lightweight. To fetch
+    // messages for a given thread use the `idThread` handler with `limit`/`before`.
     const access_token = _req.headers.get('authorization')?.split(' ')[1] || _req.cookies.get('access_token')?.value;
     let rows : any[] = [];
+    const limitParam = Number(_req.nextUrl.searchParams.get('limit') ?? '') || 20;
+    const beforeParam = _req.nextUrl.searchParams.get('before') ?? null; // ISO timestamp
+    const limit = Math.max(1, Math.min(200, limitParam));
+
     if (access_token) {
       try {
         const dbToken = await prisma.accessToken.findUnique({
@@ -115,12 +146,19 @@ export async function GET(_req: NextRequest) {
           include: { user: true },
         });
         if (dbToken?.user) {
+          const where: any = { userId: dbToken.user.id };
+          if (beforeParam) {
+            // paginate by updatedAt: return threads updated before the provided timestamp
+            where.updatedAt = { lt: new Date(beforeParam) };
+          }
           const threads = await prisma.thread.findMany({
-            where: { userId: dbToken.user.id },
-            include: { messages: { include: { attachments: { include: { data: true } } } } },
-            orderBy: { createdAt: 'asc' },
+            where,
+            select: { idThread: true, id: true, name: true, createdAt: true, updatedAt: true, context: true, model: true },
+            orderBy: { updatedAt: 'desc' },
+            take: limit,
           });
-          rows = threads;
+          // normalize idThread/id into id for client expectations
+          rows = threads.map(t => ({ id: t.idThread ?? t.id, name: t.name, createdAt: t.createdAt, updatedAt: t.updatedAt, context: t.context, model: t.model }));
         } else {
           rows = [];
         }

@@ -12,6 +12,13 @@ type Thread = { id: string; name: string, date?: Date, messages?: Messages, stat
 const defaultThreadName = "New Thread";
 const allThreads : Thread[] = [];
 let loadingThreadsPromise: Promise<Thread[]> | null = null;
+// guard set for threads currently loading their initial message page
+const loadingInitialMessages = new Set<string>();
+
+/** Returns true when the initial message page for the given thread id is currently being loaded. */
+export function isLoadingInitialMessages(threadId: string) {
+    try { return loadingInitialMessages.has(threadId); } catch (e) { return false; }
+}
 /**
  * Check whether a thread id exists in local storage cache.
  * @param id - thread identifier to check
@@ -259,6 +266,49 @@ export function setActualThread(thread: Thread | null) {
             window.dispatchEvent(ev);
         } catch (e) {
             
+        }
+
+        // If the newly set thread is remote and has no messages loaded yet,
+        // fetch the initial page of messages from the server so UI can render
+        // the first chunk without waiting for manual lazy-load.
+        try {
+            if (thread && thread.status === 'remote') {
+                const tid = thread.id;
+                const msgsPresent = Array.isArray(thread.messages) && thread.messages.length > 0;
+                if (!msgsPresent && !loadingInitialMessages.has(tid)) {
+                    loadingInitialMessages.add(tid);
+                    // fetch first page (newest messages) - we request a moderate page size
+                    (async () => {
+                        try {
+                            // use client helper if available
+                            const page = await fetchThreadMessagesPage(tid, 50, undefined as any);
+                            if (page && page.ok && Array.isArray(page.messages) && page.messages.length > 0) {
+                                // normalize into Message objects
+                                const normalized = page.messages.map((m: any) => ({
+                                    id: String(m.idMessage ?? m.id ?? ''),
+                                    text: String(m.text ?? ''),
+                                    thinking: String(m.thinking ?? ''),
+                                    sender: (m.sender === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
+                                    timestamp: (m.timestamp ? new Date(m.timestamp) : new Date()),
+                                    parentId: String(m.parentId ?? ''),
+                                    status: 'sync' as const,
+                                    attachments: (m.attachments ?? []) as any[]
+                                }) as Message);
+                                thread.messages = normalized;
+                                try { persistThread(thread); } catch (e) {}
+                                try { setActualThread(thread); } catch (e) {}
+                                try { updateActualThread(); } catch (e) {}
+                            }
+                        } catch (e) {
+                            // ignore network errors
+                        } finally {
+                            loadingInitialMessages.delete(tid);
+                        }
+                    })();
+                }
+            }
+        } catch (e) {
+            // ignore
         }
     } catch (e) {
     
@@ -621,6 +671,194 @@ export async function updateServerThread(thread: Thread) {
         updateActualThread();
     } catch (err) {
         console.error('updateServerThread error', err);
+    }
+}
+/**
+ * Fetch a paginated page of messages for a given external thread id.
+ * @param idThread external thread id
+ * @param limit number of messages to fetch (most recent first)
+ * @param before ISO timestamp to fetch messages before
+ */
+export async function fetchThreadMessagesPage(idThread: string, limit: number = 50, before?: string) {
+    try {
+        const url = new URL('/api/thread', window.location.origin);
+        url.searchParams.set('idThread', idThread);
+        url.searchParams.set('limit', String(limit));
+        if (before) url.searchParams.set('before', before);
+        const res = await fetch(url.toString());
+        if (!res.ok) return { ok: false, messages: [] };
+        const json = await res.json().catch(() => null);
+        if (!json || !json.ok) return { ok: false, messages: [] };
+        return { ok: true, messages: json.messages ?? [] };
+    } catch (e) {
+        console.error('fetchThreadMessagesPage failed', e);
+        return { ok: false, messages: [] };
+    }
+}
+
+/**
+ * Load the initial page of messages for a thread and replace the thread's messages.
+ * Useful after activating a remote thread to quickly populate the most recent messages.
+ */
+export async function loadInitialThreadMessages(threadId: string, limit: number = 50) {
+    try {
+        const page = await fetchThreadMessagesPage(threadId, limit, undefined);
+        if (!page || !page.ok) return { ok: false, messages: [] };
+        const normalized = page.messages.map((m: any) => ({
+            id: String(m.idMessage ?? m.id ?? ''),
+            text: String(m.text ?? ''),
+            thinking: String(m.thinking ?? ''),
+            sender: (m.sender === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
+            timestamp: (m.timestamp ? new Date(m.timestamp) : new Date()),
+            parentId: String(m.parentId ?? ''),
+            status: 'sync' as const,
+            attachments: (m.attachments ?? []) as any[]
+        }) as Message);
+        await replaceThreadMessages(threadId, normalized);
+        return { ok: true, messages: normalized };
+    } catch (e) {
+        return { ok: false, messages: [] };
+    }
+}
+
+/**
+ * Load older messages before the provided ISO timestamp (or before the oldest known) and prepend them.
+ */
+export async function loadOlderMessages(threadId: string, beforeIso?: string, limit: number = 50) {
+    try {
+        const page = await fetchThreadMessagesPage(threadId, limit, beforeIso);
+        if (!page || !page.ok) return { ok: false, messages: [] };
+        const normalized = page.messages.map((m: any) => ({
+            id: String(m.idMessage ?? m.id ?? ''),
+            text: String(m.text ?? ''),
+            thinking: String(m.thinking ?? ''),
+            sender: (m.sender === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
+            timestamp: (m.timestamp ? new Date(m.timestamp) : new Date()),
+            parentId: String(m.parentId ?? ''),
+            status: 'sync' as const,
+            attachments: (m.attachments ?? []) as any[]
+        }) as Message);
+        // use the prepend helper which deduplicates and persists
+        const updated = await prependMessagesToThread(threadId, normalized);
+        return { ok: true, messages: normalized, updatedThread: updated };
+    } catch (e) {
+        return { ok: false, messages: [] };
+    }
+}
+
+/**
+ * Internal helper: persist thread into local cache and in-memory list,
+ * and notify listeners if this is the active thread.
+ */
+function persistThread(thread: Thread) {
+    try {
+        // update persisted cache
+        const cache = readThreadCache() ?? [];
+        const idx = cache.findIndex(t => t.id === thread.id);
+        if (idx !== -1) cache[idx] = thread;
+        else cache.push(thread);
+        try { setThreadCache(cache); } catch (e) {}
+
+        // update in-memory index
+        const allIdx = allThreads.findIndex(t => t.id === thread.id);
+        if (allIdx !== -1) allThreads[allIdx] = thread;
+        else allThreads.push(thread);
+
+        // if this is the active thread, update global and notify
+        const active = getActualThread();
+        if (active && active.id === thread.id) {
+            try { setActualThread(thread); } catch (e) {}
+            try { updateActualThread(); } catch (e) {}
+        }
+    } catch (e) {
+        // swallow errors
+    }
+}
+
+/** Append a single message to a thread (by id). Persists and notifies. */
+export async function appendMessageToThread(threadId: string, message: Message) {
+    try {
+        let t = (getActualThread()?.id === threadId) ? getActualThread() : (readThreadCache(threadId) as Thread | null);
+        if (!t) {
+            // try fetching threads list
+            t = await findThreadById(threadId) ?? null;
+        }
+        if (!t) return null;
+        t.messages = t.messages ?? [];
+        // avoid duplicate id
+        if (message && message.id && t.messages.some(m => m.id === message.id)) return t;
+        t.messages.push(message as any);
+        persistThread(t);
+        return t;
+    } catch (e) {
+        return null;
+    }
+}
+
+/** Prepend messages to a thread (older messages). Deduplicates by id. */
+export async function prependMessagesToThread(threadId: string, messages: Message[]) {
+    try {
+        let t = (getActualThread()?.id === threadId) ? getActualThread() : (readThreadCache(threadId) as Thread | null);
+        if (!t) t = await findThreadById(threadId) ?? null;
+        if (!t) return null;
+        t.messages = t.messages ?? [];
+        const existingIds = new Set(t.messages.map(m => m.id));
+        const toAdd = (messages || []).filter(m => m && m.id && !existingIds.has(m.id));
+        if (toAdd.length === 0) return t;
+        t.messages = [...toAdd, ...t.messages];
+        persistThread(t);
+        return t;
+    } catch (e) {
+        return null;
+    }
+}
+
+/** Update/replace a message in a thread by id. If not found, optionally append. */
+export async function updateMessageInThread(threadId: string, message: Message, appendIfMissing: boolean = true) {
+    try {
+        let t = (getActualThread()?.id === threadId) ? getActualThread() : (readThreadCache(threadId) as Thread | null);
+        if (!t) t = await findThreadById(threadId) ?? null;
+        if (!t) return null;
+        t.messages = t.messages ?? [];
+        const idx = t.messages.findIndex(m => m.id === message.id);
+        if (idx !== -1) {
+            // merge fields onto existing object to preserve references
+            try { Object.assign(t.messages[idx], message); } catch (e) { t.messages[idx] = message as any; }
+        } else if (appendIfMissing) {
+            t.messages.push(message as any);
+        }
+        persistThread(t);
+        return t;
+    } catch (e) {
+        return null;
+    }
+}
+
+/** Remove a message by id from a thread. */
+export async function removeMessageFromThread(threadId: string, messageId: string) {
+    try {
+        let t = (getActualThread()?.id === threadId) ? getActualThread() : (readThreadCache(threadId) as Thread | null);
+        if (!t) t = await findThreadById(threadId) ?? null;
+        if (!t) return null;
+        t.messages = (t.messages ?? []).filter(m => m.id !== messageId);
+        persistThread(t);
+        return t;
+    } catch (e) {
+        return null;
+    }
+}
+
+/** Replace entire messages array for a thread. */
+export async function replaceThreadMessages(threadId: string, messages: Message[]) {
+    try {
+        let t = (getActualThread()?.id === threadId) ? getActualThread() : (readThreadCache(threadId) as Thread | null);
+        if (!t) t = await findThreadById(threadId) ?? null;
+        if (!t) return null;
+        t.messages = messages ?? [];
+        persistThread(t);
+        return t;
+    } catch (e) {
+        return null;
     }
 }
 

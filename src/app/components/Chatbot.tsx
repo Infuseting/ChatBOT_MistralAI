@@ -1,7 +1,7 @@
 "use client"
 import { IoMdSettings, IoMdShareAlt } from "react-icons/io";
 import { motion } from "motion/react";
-import { getActualThread, getShareLink, Thread, updateServerThread } from "../utils/Thread";
+import { getActualThread, getShareLink, Thread, updateServerThread, isLoadingInitialMessages } from "../utils/Thread";
 import { handleMessageSend, handleAudioSend } from "../utils/Agent";
 import { showErrorToast, showSuccessToast } from "../utils/toast";
 import { useState, useRef, useEffect } from "react";
@@ -30,6 +30,8 @@ export default function Chatbot() {
     const [isNewestBranch, setisNewestBranch] = useState<boolean>(true);
     // whether the current thread is a shared thread (read-only behavior)
     const [isShareThread, setIsShareThread] = useState<boolean>(actualThread?.share ?? false);
+    // control audio modal at top-level so it persists across ChatInput remounts
+    const [showAudioModal, setShowAudioModal] = useState<boolean>(false);
 
     // refs used for keyboard/focus and positioning
     const menuRef = useRef<HTMLDivElement | null>(null);
@@ -264,7 +266,7 @@ export default function Chatbot() {
                         </div>
 
                         <div className="flex items-center space-x-2 bg-gray-800 rounded-md shadow-lg w-full p-4">
-                            <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} handleAudioSend={handleAudioSendWrapper} />
+                            <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} handleAudioSend={handleAudioSendWrapper} showAudioModal={showAudioModal} setShowAudioModal={setShowAudioModal} />
                         </div>
                     </div>
                 )}
@@ -283,6 +285,14 @@ export default function Chatbot() {
                 <div className="mx-auto max-w-80 h-full flex items-center justify-center">
                     <p className="text-gray-300 text-lg text-center">No thread selected. Please create or select a thread to start chatting.</p>
                 </div>
+            ) : isLoadingInitialMessages(actualThread.id) ? (
+                // Show a loading placeholder while the first message page for a remote thread is being fetched
+                <div className="flex flex-col h-full">
+                    <div className="flex-1 w-full flex items-center flex-col justify-center space-y-4">
+                        <div className="loader-border w-12 h-12 rounded-full border-4 border-t-transparent border-white animate-spin" />
+                        <p className="text-gray-300">Chargement des messages...</p>
+                    </div>
+                </div>
             ) : ((actualThread?.messages?.length ?? 0) > 0) ? (
                 // Layout: column with messages area that fills available space and a footer for ChatInput.
                 <div className="flex flex-col h-full">
@@ -291,7 +301,7 @@ export default function Chatbot() {
                     </div>
                     <div className="bg-gray-700 pointer-events-auto mx-auto w-full 2xl:max-w-6xl xl:max-w-4xl lg:max-w-3xl md:max-w-2xl sm:max-w-lg max-w-80 p-4 pt-0">
                         <div className="flex items-center space-x-2 bg-gray-800 rounded-md shadow-lg w-full p-4">
-                            <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} handleAudioSend={handleAudioSendWrapper} />
+                            <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} handleAudioSend={handleAudioSendWrapper} showAudioModal={showAudioModal} setShowAudioModal={setShowAudioModal} />
                         </div>
                     </div>
                 </div>
@@ -302,7 +312,7 @@ export default function Chatbot() {
                         <div className="w-[calc(100%_-_2.5rem)] 2xl:max-w-6xl xl:max-w-4xl lg:max-w-3xl md:max-w-2xl sm:max-w-lg max-w-80 max-h-90 rounded-md p-4 mx-auto bg-gray-800">
                             <div className="flex flex-1 items-center">
                                 {/* Empty-thread input area (still uses ChatInput) */}
-                                <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} handleAudioSend={handleAudioSendWrapper} />
+                                <ChatInput actualThread={actualThread} isNewestBranch={isNewestBranch} isShareThread={isShareThread} handleMessageSend={handleMessageSend} handleAudioSend={handleAudioSendWrapper} showAudioModal={showAudioModal} setShowAudioModal={setShowAudioModal} />
                             </div>
                         </div>
                     </div>

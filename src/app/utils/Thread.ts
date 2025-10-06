@@ -41,6 +41,21 @@ export function threadExists(id: string) : boolean {
     }
 }
 
+// Detect guest users. Middleware sets a cookie `is_guest=1` when no valid
+// authentication is present. This helper is used to disable persistence and
+// remote sync for guests so their data remains ephemeral in-memory only.
+function isGuest(): boolean {
+    try {
+        if (typeof window === 'undefined') return false;
+        // Prefer cookie lookup for `is_guest`
+        const cookie = window.document.cookie || '';
+        if (cookie.includes('is_guest=1')) return true;
+        // Fallback: if no access token cookie present, treat as guest
+        if (!cookie.includes('access_token')) return true;
+    } catch (e) {}
+    return false;
+}
+
 /**
  * Read a lightweight marker that indicates which thread is currently open.
  * The marker is stored in localStorage under `openThreadMarker` and has
@@ -109,11 +124,13 @@ export async function openOrCreateThreadWithId(id: string) : Promise<Thread> {
         share: false
     };
     setActualThread(thread);
-    // persist newly created thread in cache
+    // persist newly created thread in cache only for authenticated users.
     try {
-        const all = readThreadCache();
-        all.push(thread);
-        setThreadCache(all);
+        if (!isGuest()) {
+            const all = readThreadCache();
+            all.push(thread);
+            setThreadCache(all);
+        }
     } catch (e) {}
     return thread;
 }
@@ -191,8 +208,8 @@ export async function openSharedThread(id: string) : Promise<Thread> {
                     model: payload.model ?? getActualModel() ?? 'mistral-medium-latest',
                     share: true,
                 };
-                // persist
-                try { const all = readThreadCache(); all.push(thread); setThreadCache(all); } catch (e) {}
+                // persist only for authenticated users
+                try { if (!isGuest()) { const all = readThreadCache(); all.push(thread); setThreadCache(all); } } catch (e) {}
                 setActualThread(thread);
                 return thread;
             }
@@ -212,7 +229,7 @@ export async function openSharedThread(id: string) : Promise<Thread> {
         model: getActualModel() ?? 'mistral-medium-latest',
         share: true,
     };
-    try { const all = readThreadCache(); all.push(thread); setThreadCache(all); } catch (e) {}
+    try { if (!isGuest()) { const all = readThreadCache(); all.push(thread); setThreadCache(all); } } catch (e) {}
     setActualThread(thread);
     return thread;
 }
@@ -238,9 +255,13 @@ export function newThread() {
     } 
     setActualThread(thread);
     try {
-        const all = readThreadCache();
-        all.push(thread);
-        setThreadCache(all);
+        // Do not persist guests' threads — keep them in-memory only so they
+        // are lost on refresh as requested.
+        if (!isGuest()) {
+            const all = readThreadCache();
+            all.push(thread);
+            setThreadCache(all);
+        }
     } catch (e) {}
     return thread;
 }
@@ -322,6 +343,8 @@ export function setActualThread(thread: Thread | null) {
  */
 export async function reloadThread() {
     try {
+        // guests must not fetch remote thread lists
+        if (isGuest()) return [];
         try {
             const res = await fetch('/api/thread');
             if (!res.ok) return [];
@@ -448,6 +471,8 @@ export async function getThreads(): Promise<Thread[]> {
  * @returns share URL or null
  */
 export async function getShareLink(thread: Thread) : Promise<string | null | void> {
+    // guests cannot request share codes (requires an authenticated user)
+    if (isGuest()) return null;
     const result = await fetch('/api/thread', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'share', idThread: thread.id }) })
         .catch((e) => {
             console.error('Failed to notify server about sharing thread', e);
@@ -503,6 +528,8 @@ async function updateThreadList() {
 export async function createServerThread(thread: Thread) {
     console.log('Creating server thread for', thread);
     try {
+        // guests must never create remote threads
+        if (isGuest()) return;
         if (thread.status === 'remote') return;
         thread.name = (await generateThreadName(thread)) || thread.name || defaultThreadName;
         try {
@@ -548,6 +575,7 @@ export async function createServerThread(thread: Thread) {
 }
 export async function syncServerThread(thread: Thread) {
     try {
+        if (isGuest()) return;
         const msgs = (thread.messages ?? []) as any[];
         if (msgs.length === 0) return;
         const toInsert = msgs
@@ -640,6 +668,7 @@ export async function syncServerThread(thread: Thread) {
 
 export async function updateServerThread(thread: Thread) {
     try {
+        if (isGuest()) return;
         if (!thread) return;
 
         // Ensure thread exists remotely first
@@ -681,6 +710,11 @@ export async function updateServerThread(thread: Thread) {
  */
 export async function fetchThreadMessagesPage(idThread: string, limit: number = 50, before?: string) {
     try {
+        // guests must not fetch private threads from the API. Shared threads
+        // should be loaded via openSharedThread which uses a shareCode and is
+        // permitted for guests. Here we simply avoid calling the API when
+        // running as guest.
+        if (isGuest()) return { ok: false, messages: [] };
         const url = new URL('/api/thread', window.location.origin);
         url.searchParams.set('idThread', idThread);
         url.searchParams.set('limit', String(limit));
@@ -752,14 +786,19 @@ export async function loadOlderMessages(threadId: string, beforeIso?: string, li
  */
 function persistThread(thread: Thread) {
     try {
-        // update persisted cache
-        const cache = readThreadCache() ?? [];
-        const idx = cache.findIndex(t => t.id === thread.id);
-        if (idx !== -1) cache[idx] = thread;
-        else cache.push(thread);
-        try { setThreadCache(cache); } catch (e) {}
+        // For guest sessions we only update the in-memory list and DO NOT
+        // persist to localStorage or attempt any server-side sync. This
+        // ensures guest threads are ephemeral and lost after refresh.
+        const guest = isGuest();
+        if (!guest) {
+            const cache = readThreadCache() ?? [];
+            const idx = cache.findIndex(t => t.id === thread.id);
+            if (idx !== -1) cache[idx] = thread;
+            else cache.push(thread);
+            try { setThreadCache(cache); } catch (e) {}
+        }
 
-        // update in-memory index
+        // update in-memory index always so UI can see immediate changes
         const allIdx = allThreads.findIndex(t => t.id === thread.id);
         if (allIdx !== -1) allThreads[allIdx] = thread;
         else allThreads.push(thread);

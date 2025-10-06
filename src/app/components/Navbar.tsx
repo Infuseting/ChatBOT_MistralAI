@@ -119,14 +119,16 @@ export default function Navbar() {
             try {
                 const res = await fetch('/api/user', { method: 'GET' });
                 if (!res.ok) {
-                    if (!cancelled) router.replace('/login');
+                    // treat as guest (no redirect)
+                    if (!cancelled) setUser(null);
                     return;
                 }
                 const data = await res.json();
                 if (!cancelled) setUser(data ?? null);
             } catch (err) {
                 console.error('Failed to load user', err);
-                if (!cancelled) router.replace('/login');
+                // network or other error: continue as guest
+                if (!cancelled) setUser(null);
             }
         }
         void loadUser();
@@ -223,23 +225,36 @@ export default function Navbar() {
                 </motion.div>
             
             <div className="relative">
-                <div ref={(node) => { try { userMenuRefs.setReference(node as any); userMenuTriggerRef.current = node as HTMLElement | null; } catch {} }} className="list-none w-full p-2 rounded-md hover:bg-gray-600 flex items-center cursor-pointer" role="button" onClick={() => { setMenuOpen(prev => !prev); setTimeout(() => userMenuUpdate?.(), 0); }}>
-                    <img src={user?.picture ?? 'https://placehold.co/32x32'} alt="User Avatar" className="w-6 h-6 rounded-full mr-2" />
-                    <span className="text-sm truncate">{user?.name ?? 'Username'}</span>
-                    <IoMdArrowDropdown className={`ml-auto text-gray-400 select-none transform transition-transform duration-200 ${menuOpen ? 'rotate-180' : ''}`} />
-                </div>
-
-                {menuOpen && (
-                    <div ref={(node) => { try { userMenuRefs.setFloating(node as any); userMenuElRef.current = node as HTMLElement | null; } catch {} }} style={{ position: userMenuStrategy as any, left: userMenuX ?? 0, top: userMenuY ?? 0, zIndex: 9999 }} className="w-56 p-2 bg-gray-800 rounded-md border border-gray-700 shadow-md space-y-1">
-                        <motion.button onClick={() => setShowSettings(true)} className="w-full text-left p-2 rounded hover:bg-gray-700 flex items-center space-x-4" type="button" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                            <IoMdSettings className="text-lg" />
-                            <span>Settings</span>
-                        </motion.button>
-                        <motion.button onClick={() => logout()} className="w-full text-left p-2 rounded hover:bg-gray-700 text-red-400 flex items-center space-x-4" type="button" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                            <FaDoorOpen className="text-lg" />
-                            <span>Log Out</span>
-                        </motion.button>
+                {/* If user is undefined we are still loading; if null -> guest */}
+                {user === undefined ? (
+                    <div className="list-none w-full p-2 rounded-md flex items-center">
+                        <span className="text-sm text-gray-400">Loading...</span>
                     </div>
+                ) : user === null ? (
+                    <div className="w-full p-2">
+                        <a href="/login" className="w-full inline-block text-center bg-indigo-600 hover:bg-indigo-700 text-white py-2 px-3 rounded">Se connecter</a>
+                    </div>
+                ) : (
+                    <>
+                        <div ref={(node) => { try { userMenuRefs.setReference(node as any); userMenuTriggerRef.current = node as HTMLElement | null; } catch {} }} className="list-none w-full p-2 rounded-md hover:bg-gray-600 flex items-center cursor-pointer" role="button" onClick={() => { setMenuOpen(prev => !prev); setTimeout(() => userMenuUpdate?.(), 0); }}>
+                            <img src={user?.picture ?? 'https://placehold.co/32x32'} alt="User Avatar" className="w-6 h-6 rounded-full mr-2" />
+                            <span className="text-sm truncate">{user?.name ?? 'Username'}</span>
+                            <IoMdArrowDropdown className={`ml-auto text-gray-400 select-none transform transition-transform duration-200 ${menuOpen ? 'rotate-180' : ''}`} />
+                        </div>
+
+                        {menuOpen && (
+                            <div ref={(node) => { try { userMenuRefs.setFloating(node as any); userMenuElRef.current = node as HTMLElement | null; } catch {} }} style={{ position: userMenuStrategy as any, left: userMenuX ?? 0, top: userMenuY ?? 0, zIndex: 9999 }} className="w-56 p-2 bg-gray-800 rounded-md border border-gray-700 shadow-md space-y-1">
+                                <motion.button onClick={() => setShowSettings(true)} className="w-full text-left p-2 rounded hover:bg-gray-700 flex items-center space-x-4" type="button" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                                    <IoMdSettings className="text-lg" />
+                                    <span>Settings</span>
+                                </motion.button>
+                                <motion.button onClick={() => logout()} className="w-full text-left p-2 rounded hover:bg-gray-700 text-red-400 flex items-center space-x-4" type="button" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                                    <FaDoorOpen className="text-lg" />
+                                    <span>Log Out</span>
+                                </motion.button>
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
             {showSettings && <UserSettingsModal initialPanel={settingsInitialPanel} onClose={() => setShowSettings(false)} />}

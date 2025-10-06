@@ -12,16 +12,34 @@ export async function middleware(req: NextRequest) {
       },
     });
 
-    if (res.status !== 200) {
-      console.warn('[Middleware] Token invalide ou expiré');
-      return NextResponse.redirect(new URL('/login', req.url));
+    // If token is valid, continue normally.
+    if (res.status === 200) {
+      console.log('[Middleware] Auth OK');
+      return NextResponse.next();
     }
 
-    console.log('[Middleware] Auth OK');
-    return NextResponse.next();
+    // If token is missing/invalid, allow the request to continue but mark
+    // the visitor as a guest by setting a non-httpOnly cookie the client
+    // can read. We DO NOT redirect to /login anymore so guest users can
+    // interact with the app. Guest threads must remain ephemeral (handled
+    // in client code).
+    console.warn('[Middleware] No valid token — treating as guest');
+    const resp = NextResponse.next();
+    // Set a client-readable guest cookie so frontend can quickly detect guest
+    // sessions. Keep it simple and non-sensitive.
+    // Use a header if cookies are already present; headers.set('set-cookie',..) is
+    // compatible in Next middleware runtime.
+    try {
+      resp.headers.set('set-cookie', 'is_guest=1; Path=/; SameSite=Lax');
+    } catch (e) {
+      // ignore header set errors and just continue
+    }
+    return resp;
   } catch (error) {
     console.error('[Middleware] Erreur de validation', error);
-    return NextResponse.redirect(new URL('/login', req.url));
+    const resp = NextResponse.next();
+    try { resp.headers.set('set-cookie', 'is_guest=1; Path=/; SameSite=Lax'); } catch (e) {}
+    return resp;
   }
 }
 

@@ -193,7 +193,7 @@ High-level endpoints (see `src/app/api`):
 | Audio Call | ✅ | ✅ | ✅ |
 | Image Generation | ✅ | ✅ | ✅ |
 | Video Call | ❌ | ❌ | ❌ |
-| Access without login | ❌ | ❌ | ❌ |
+| Access without login | ✅ | ✅ | ✅ |
 | Subthread | ❌ | ❌ | ❌ |
 | Web Search | ✅ | ✅ | ✅ |
 | Keybinds | ❌ | ❌ | ❌ |

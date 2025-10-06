@@ -8,6 +8,7 @@ import { FaMagnifyingGlass, FaDoorOpen } from "react-icons/fa6";
 import { IoMdSettings, IoMdArrowDropdown } from "react-icons/io";
 import UserSettingsModal from "./UserSettingsModal";
 import SearchModal from "./SearchModal";
+import Keybinds from '../utils/Keybinds';
 import { setActualThread } from "../utils/Thread";
 import { motion } from "motion/react";
 import { newThread, getActualThread } from '../utils/Thread';
@@ -102,6 +103,22 @@ export default function Navbar() {
         router.replace('/login');
     }
     useEffect(() => {
+        // register global keybinds for quick actions
+        try {
+            Keybinds.registerKeybind('Control+Alt+N', () => {
+                try { handleNewThread(); } catch (e) {}
+            });
+            Keybinds.registerKeybind('Control+Alt+F', () => {
+                try { setShowSearch(true); } catch (e) {}
+            });
+            Keybinds.registerKeybind('Control+Alt+P', () => {
+                try { setSettingsInitialPanel('account'); setShowSettings(true); } catch (e) {}
+            });
+            Keybinds.registerKeybind('Control+Alt+M', () => {
+                try { setSettingsInitialPanel('modele'); setShowSettings(true); } catch (e) {}
+            });
+            Keybinds.startKeybinds();
+        } catch (e) {}
         let cancelled = false;
         const onOpenModelSettings = (ev?: any) => {
             try {
@@ -136,6 +153,9 @@ export default function Navbar() {
         return () => {
             cancelled = true;
             if (typeof window !== 'undefined') window.removeEventListener('openModelSettings', onOpenModelSettings as any);
+            try {
+                Keybinds.stopKeybinds();
+            } catch (e) {}
         };
     }, [router]);
     // threads are now loaded by ConversationsList component

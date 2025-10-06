@@ -196,7 +196,7 @@ High-level endpoints (see `src/app/api`):
 | Access without login | ✅ | ✅ | ✅ |
 | Subthread | ❌ | ❌ | ❌ |
 | Web Search | ✅ | ✅ | ✅ |
-| Keybinds | ❌ | ❌ | ❌ |
+| Keybinds | ✅ | ✅ | ✅ |
 | Comments & Docs | ✅ | ✅ | ✅ |
 | Project Classification | ❌ | ❌ | ❌ |
 | Lazy load | ✅ | ✅ | ✅ |
